@@ -4,3 +4,8 @@ __pycache__/
 .ipynb_checkpoints/
 outputs/
 *:Zone.Identifier
+
+# Material de referencia local (no se versiona; solo Challenge_RL.ipynb va al repo)
+RL_TragaPerras_1_(Preguntas).ipynb
+RL_Monte_Carlo_(Preguntas).ipynb
+Desafío Final MSc AI_ Conducción Autónoma.pptx
