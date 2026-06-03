@@ -1,0 +1,6 @@
+.venv-maml/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+outputs/
+*:Zone.Identifier
