@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 outputs/
+models/
+logs/
 *:Zone.Identifier
 
 # Material de referencia local (no se versiona; solo Challenge_RL.ipynb va al repo)
