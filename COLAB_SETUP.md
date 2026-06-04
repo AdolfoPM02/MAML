@@ -6,31 +6,77 @@ real** sobre **Google Colab**, respetando el contrato de evaluación del reto.
 > El entrenamiento real **no** puede hacerse en local por el conflicto de dependencias
 > de Duckietown (`numpy<=1.20`). Colab es el entorno objetivo. El profesor pide
 > **Python 3.11**; como el kernel de Colab es 3.12, montamos un **venv 3.11** y
-> ejecutamos todo como subprocess con ese intérprete.
+> ejecutamos todo como subprocess con `PY`.
 >
 > El notebook ejecutable equivalente está en `notebooks/colab_smoke.ipynb`.
 
-**Convención usada en todos los comandos:**
+**Convenciones usadas en todos los comandos:**
 ```bash
 PY=/content/venv-maml/bin/python   # intérprete del venv Python 3.11
 ```
+- El repo se clona **siempre** en `/content/MAML`. Antes de ejecutar cualquier script
+  hay que estar ahí: `%cd /content/MAML` (ver error 2).
+- Todos los comandos que usan `{PY}` se anteponen con `MPLBACKEND=Agg` (ver error 3).
 
 ---
 
-## 1. Clonar el repositorio (privado)
+## ⚠️ Errores reales encontrados en Colab y sus correcciones
 
-El repo `AdolfoPM02/MAML` es privado. Tres opciones:
+Esta receta incorpora las correcciones de cinco errores observados en una ejecución
+real del notebook:
 
-**a) Token en la URL (rápido):**
+1. **Clonado del repo privado (403 Write access not granted).** El PAT no tenía
+   permiso. → El PAT debe tener scope **`repo`** si el repositorio es privado;
+   alternativa recomendada: **hacer el repo público temporalmente** y clonar sin PAT.
+   La celda de clonado ahora borra `/content/MAML`, clona explícitamente ahí, hace
+   `%cd` y lista `scripts/` y `src/` para confirmar.
+2. **Ejecutar desde `/content` en vez de `/content/MAML`** (`can't open file
+   '/content/train.py'`, etc.). → `%cd /content/MAML` antes de cada bloque que ejecuta
+   scripts (o rutas absolutas).
+3. **Matplotlib backend al importar SB3** (`Key backend:
+   'module://matplotlib_inline.backend_inline' is not a valid value`). El subprocess
+   heredaba `MPLBACKEND` del kernel. → Fijar `MPLBACKEND=Agg` (celda + prefijo en cada
+   comando con `{PY}`).
+4. **`ModuleNotFoundError: zuper_commons`** tras instalar Duckietown con `--no-deps`.
+   → Instalar las dependencias **reales** de daffy (NO existe `zuper-ipce` en PyPI):
+   `zuper-commons-z6`, `duckietown-world-daffy`, `PyGeometry-z6`, `carnivalmirror`, etc.
+5. **`ModuleNotFoundError: gym`** (gym_duckietown usa el `gym` antiguo). → Instalar
+   `gym==0.26.2` junto a `gymnasium`, y re-fijar `numpy==1.26.4` después.
+
+---
+
+## 1. Clonar el repositorio en `/content/MAML`
+
+**Si el repo es PRIVADO** (el PAT debe tener scope **`repo`**):
 ```python
 from getpass import getpass
 import os
-os.environ["GH_PAT"] = getpass("GitHub PAT: ")
-!git clone https://$GH_PAT@github.com/AdolfoPM02/MAML.git
-%cd MAML
+
+token = getpass("GitHub PAT con permiso repo: ")
+repo_url = f"https://AdolfoPM02:{token}@github.com/AdolfoPM02/MAML.git"
+
+!rm -rf /content/MAML
+!git clone {repo_url} /content/MAML
+%cd /content/MAML
+!pwd
+!ls -la
+!ls scripts
+!ls src
 ```
-**b) `gh` CLI** autenticado con el PAT. **c)** Hacer el repo público temporalmente y
-`git clone https://github.com/AdolfoPM02/MAML.git`.
+
+**Alternativa recomendada — repo PÚBLICO temporal** (sin PAT, más simple y sin riesgo
+de filtrar el token):
+```python
+!rm -rf /content/MAML
+!git clone https://github.com/AdolfoPM02/MAML.git /content/MAML
+%cd /content/MAML
+!pwd
+!ls -la
+!ls scripts
+!ls src
+```
+`ls scripts` y `ls src` deben mostrar los archivos; si no, el clonado falló y el resto
+de celdas no encontrará los scripts.
 
 ---
 
@@ -43,6 +89,7 @@ os.environ["GH_PAT"] = getpass("GitHub PAT: ")
 !python3.11 -m venv /content/venv-maml
 !/content/venv-maml/bin/python -m pip install -U pip wheel setuptools
 ```
+En el notebook se define `PY = "/content/venv-maml/bin/python"`.
 
 ---
 
@@ -54,37 +101,56 @@ y, en la práctica, también a Duckietown (pese a su pin declarado `<=1.20`).
 ```bash
 PY=/content/venv-maml/bin/python
 # a) Stack moderno (mismas versiones con las que se desarrolló el código)
-!$PY -m pip install "numpy==1.26.4" "stable-baselines3==2.8.0" torch \
+!{PY} -m pip install "numpy==1.26.4" "stable-baselines3==2.8.0" torch \
      "opencv-python" "gymnasium==1.2.3" pyvirtualdisplay
+
 # b) Duckietown SIN deps (para que no arrastre numpy<=1.20)
-!$PY -m pip install --no-deps "git+https://github.com/duckietown/gym-duckietown.git@daffy"
-# c) Dependencias de runtime de Duckietown (salvo numpy)
-!$PY -m pip install "pyglet==1.5.27" pyzmq PyYAML scikit-image pillow
-# d) Re-fijar numpy por si algún paquete lo cambió
-!$PY -m pip install "numpy==1.26.4" --force-reinstall --no-deps
+!{PY} -m pip install --no-deps "git+https://github.com/duckietown/gym-duckietown.git@daffy"
+
+# c) Dependencias REALES de gym-duckietown daffy (NO usar zuper-ipce: no existe en PyPI)
+!{PY} -m pip install \
+  "zuper-commons-z6" \
+  "duckietown-world-daffy" \
+  "PyGeometry-z6" \
+  "carnivalmirror==0.6.2" \
+  "pyzmq>=16.0.0" \
+  "PyYAML>=3.11" \
+  "Pillow" \
+  "typing_extensions" \
+  "pyglet==1.5.27"
+
+# d) gym ANTIGUO: gym_duckietown hace `from gym.envs.registration import register`
+!{PY} -m pip install "gym==0.26.2"
+
+# e) Re-fijar numpy por si algún paso lo cambió
+!{PY} -m pip install "numpy==1.26.4" --force-reinstall --no-deps
 ```
 
+> `pyglet==1.5.27` se mantiene porque es necesario para el render OpenGL de Duckietown.
 > Las versiones son **candidatas**: se afinan en el primer run real y luego se
 > congelan en `requirements.txt` (paso 10).
 
 ---
 
-## 4. Verificar imports
+## 4. Verificar imports (gym **y** gymnasium)
 
 ```bash
-!$PY -c "import numpy,torch,cv2,gymnasium,stable_baselines3; \
-import gym_duckietown; print('numpy',numpy.__version__,'torch',torch.__version__); \
+!MPLBACKEND=Agg {PY} -c "import numpy, torch, cv2, gym, gymnasium, stable_baselines3; \
+import gym_duckietown; \
+print('numpy', numpy.__version__, 'torch', torch.__version__); \
+print('gym', gym.__version__, 'gymnasium', gymnasium.__version__); \
 print('duckietown OK')"
 ```
-Debe imprimir `numpy 1.26.4 ...` y `duckietown OK`.
+Debe imprimir `numpy 1.26.4 ...`, las versiones de gym/gymnasium y `duckietown OK`.
 
 ---
 
 ## 5. Smoke tests con MOCK (no requieren display)
 
 ```bash
-!$PY scripts/smoke_test_phase2.py
-!$PY scripts/smoke_test_model_load.py
+%cd /content/MAML
+!MPLBACKEND=Agg {PY} scripts/smoke_test_phase2.py
+!MPLBACKEND=Agg {PY} scripts/smoke_test_model_load.py
 ```
 Esperado: 12/12 checks y "CONTRATO DE CARGA: TODO OK". Si esto falla, el problema es
 del stack ML (no de Duckietown ni del display).
@@ -94,7 +160,8 @@ del stack ML (no de Duckietown ni del display).
 ## 6. Duckietown REAL — `reset()`
 
 ```bash
-!xvfb-run -a -s "-screen 0 1024x768x24" $PY scripts/check_duckie_real.py --reset-only
+%cd /content/MAML
+!MPLBACKEND=Agg xvfb-run -a -s "-screen 0 1024x768x24" {PY} scripts/check_duckie_real.py --reset-only
 ```
 Esperado: `reset() entorno base -> RGB (480, 640, 3)`. Aquí se valida que el
 contexto OpenGL/headless funciona.
@@ -104,7 +171,8 @@ contexto OpenGL/headless funciona.
 ## 7. Wrappers + shapes con Duckietown REAL
 
 ```bash
-!xvfb-run -a $PY scripts/check_duckie_real.py
+%cd /content/MAML
+!MPLBACKEND=Agg xvfb-run -a {PY} scripts/check_duckie_real.py
 ```
 Esperado: `DuckieWrapper -> (1, 64, 64)` y `build_vec_env -> obs_space (4, 64, 64)`.
 
@@ -113,7 +181,8 @@ Esperado: `DuckieWrapper -> (1, 64, 64)` y `build_vec_env -> obs_space (4, 64, 6
 ## 8. Entrenar un PPO corto real
 
 ```bash
-!xvfb-run -a $PY train.py --algo ppo --map Duckietown-loop_empty-v0 \
+%cd /content/MAML
+!MPLBACKEND=Agg xvfb-run -a {PY} train.py --algo ppo --map Duckietown-loop_empty-v0 \
      --timesteps 5000 --output ppo_colab_test
 ```
 Genera `models/ppo_colab_test.zip`. (Con GPU, `--device auto` la usará.)
@@ -123,10 +192,11 @@ Genera `models/ppo_colab_test.zip`. (Con GPU, `--device auto` la usará.)
 ## 9. Evaluar el modelo real
 
 ```bash
-!xvfb-run -a $PY eval.py --algo ppo --model models/ppo_colab_test \
+%cd /content/MAML
+!MPLBACKEND=Agg xvfb-run -a {PY} eval.py --algo ppo --model models/ppo_colab_test \
      --map Duckietown-loop_empty-v0 --episodes 3
 # Prueba del contrato en el mapa oculto (solo evaluación):
-!xvfb-run -a $PY eval.py --algo ppo --model models/ppo_colab_test \
+!MPLBACKEND=Agg xvfb-run -a {PY} eval.py --algo ppo --model models/ppo_colab_test \
      --map Duckietown-loop_obstacles-v0 --episodes 3 --allow-eval
 ```
 Imprime recompensa acumulada media ± std y longitud media. El entrenamiento en
@@ -139,22 +209,40 @@ Imprime recompensa acumulada media ± std y longitud media. El entrenamiento en
 > **Aún no se hace**: requiere el entrenamiento real completo. Documentado para después.
 
 ```bash
+%cd /content/MAML
 # Copiar el mejor modelo al nombre EXACTO del contrato
 !cp models/<mejor_modelo>.zip models/best_duckie_agent.zip
 # Congelar dependencias con versiones exactas (==)
-!$PY -m pip freeze > requirements.txt
+!{PY} -m pip freeze > requirements.txt
 ```
 Revisar que `requirements.txt` incluya: `stable-baselines3==2.8.0`, `torch==...`,
-`gymnasium==1.2.3`, `numpy==1.26.4`, `gym-duckietown` (línea de git), `opencv-python`,
-`pyglet==1.5.27`, `pyvirtualdisplay`. Hacer el **dry-run** del contrato: Colab nuevo →
-instalar solo desde `requirements.txt` → cargar `best_duckie_agent.zip` → evaluar.
+`gymnasium==1.2.3`, `gym==0.26.2`, `numpy==1.26.4`, `gym-duckietown` (línea de git),
+`opencv-python`, `pyglet==1.5.27`, `zuper-commons-z6`, `duckietown-world-daffy`,
+`PyGeometry-z6`, `carnivalmirror==0.6.2`, `pyvirtualdisplay`. Hacer el **dry-run** del
+contrato: Colab nuevo → instalar solo desde `requirements.txt` → cargar
+`best_duckie_agent.zip` → evaluar.
 
 ---
 
 ## Troubleshooting
 
-**numpy se rompe / `gym_duckietown` no importa.** Reejecutar el paso 3d
-(`numpy==1.26.4 --force-reinstall --no-deps`) y `!$PY -c "import numpy; print(numpy.__version__)"`.
+**403 al clonar.** PAT sin scope `repo` (privado) → regenerar PAT con `repo`, o hacer el
+repo público temporalmente. Confirmar con `!ls scripts` tras clonar.
+
+**`can't open file '/content/...py'`.** No estás en `/content/MAML`. Ejecutar
+`%cd /content/MAML` (está al inicio de cada celda de ejecución).
+
+**`Key backend: '...backend_inline' is not a valid value`.** Falta `MPLBACKEND=Agg`.
+Está como celda (`os.environ["MPLBACKEND"]="Agg"`) y como prefijo de cada comando `{PY}`.
+
+**`ModuleNotFoundError: zuper_commons`.** Faltan deps de Duckietown por el `--no-deps`.
+Instalar el bloque del paso 3c. **No** instalar `zuper-ipce` (no existe en PyPI).
+
+**`ModuleNotFoundError: gym`.** Falta el gym antiguo. `!{PY} -m pip install "gym==0.26.2"`
+y re-fijar `numpy==1.26.4`.
+
+**numpy se rompe / `gym_duckietown` no importa.** Reejecutar el paso 3e
+(`numpy==1.26.4 --force-reinstall --no-deps`) y `!{PY} -c "import numpy; print(numpy.__version__)"`.
 Verificar numpy tras cada bloque de instalación.
 
 **OpenGL / display.**
