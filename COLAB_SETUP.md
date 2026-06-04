@@ -241,10 +241,49 @@ CNN** del **entorno real**, usando un entorno SINTÉTICO con espacios idénticos
 
 ---
 
+## 8C. Últimos fixes: backend OpenGL y orden de inicialización
+
+El diagnóstico 8B confirmó que el segfault ocurre al **inicializar PPO con el entorno
+Duckietown real** (no CustomCNN, no spaces, no learn). Dos vías de fix controladas:
+
+**(1) Cambiar el backend OpenGL** (variable de entorno, no se hardcodea en Python):
+
+```bash
+%cd /content/MAML
+# A) EGL + real sin CustomCNN
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" PYOPENGL_PLATFORM=egl xvfb-run -a {PY} scripts/debug_duckie_runtime.py --sb3-init --no-custom-cnn --device cpu
+# B) OSMesa + real sin CustomCNN (instala libosmesa6 si falta: !sudo apt-get install -y libosmesa6)
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" PYOPENGL_PLATFORM=osmesa xvfb-run -a {PY} scripts/debug_duckie_runtime.py --sb3-init --no-custom-cnn --device cpu
+```
+
+**(2) Cambiar el orden de inicialización** (`--init-order model-first`: construir PPO
+sobre un env sintético compatible y luego `set_env(real)`):
+
+```bash
+# C) model-first sin CustomCNN
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --sb3-init --no-custom-cnn --device cpu --init-order model-first
+# D) model-first con CustomCNN
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --sb3-init --device cpu --init-order model-first
+```
+
+**Interpretación / decisión:**
+- Si **EGL** o **OSMesa** dan `FIN OK` → usar ese `PYOPENGL_PLATFORM` también al entrenar
+  (anteponerlo en los comandos de la sección 8).
+- Si **model-first** da `FIN OK` (`set_env OK`) → la solución es inicializar PPO antes de
+  tocar Duckietown; en una fase posterior se adaptará `train.py` para soportar ese flujo
+  (NO se toca `train.py` todavía).
+- Si **todo** sigue en segfault → el fallo está en la integración nativa SB3+Duckietown
+  en Colab (xvfb/pyglet/OpenGL). **Plan B**: documentar y considerar alternativas (otro
+  runtime/imagen, `gym-duckietown` en proceso separado del de entrenamiento, o reducir el
+  alcance a evaluar un modelo provisto), a decidir contigo.
+
+---
+
 ## 8. Entrenar un PPO corto real (CPU forzada)
 
-> **Ejecutar solo si los diagnósticos 8A (`--sb3-learn`) y 8B no crashean.** Si 8B revela
-> que el crash es del entorno real + SB3 init, NO ejecutes esta sección hasta resolverlo.
+> **Ejecutar solo si los diagnósticos 8A/8B/8C no crashean** (con el `PYOPENGL_PLATFORM`
+> y/o `--init-order` que haya resultado estable en 8C). Si todo crashea, ver el Plan B
+> de 8C antes de continuar.
 > Forzamos **CPU**: Duckietown/OpenGL/xvfb + PyTorch CUDA provoca segfault (ver
 > troubleshooting). La prioridad del contrato es que **cargue y ejecute**.
 

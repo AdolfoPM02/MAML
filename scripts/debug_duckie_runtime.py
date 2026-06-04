@@ -1,10 +1,10 @@
 """Diagnóstico de runtime de Duckietown (aislar segfaults nativos).
 
 El entrenamiento PPO real en Colab crashea con `Segmentation fault (core dumped)`.
-El diagnóstico previo mostró que el crash ocurre al **construir PPO** con el entorno
-real (fase `sb3 init`), no en reset/step/VecFrameStack ni en learn. Este script aísla
-si la causa es SB3/torch/CNN o el entorno real, usando un entorno SINTÉTICO con espacios
-idénticos a los de Duckietown tras FrameStack.
+Diagnósticos previos acotaron la causa: el crash ocurre al **construir/inicializar PPO
+con el entorno Duckietown real** bajo xvfb/pyglet/OpenGL. NO es CUDA, NO es CustomCNN,
+NO son los spaces, NO es VecFrameStack, NO es learn (un entorno sintético con espacios
+idénticos inicializa PPO sin problema).
 
 Niveles de aislamiento (de menor a mayor):
   A) base            : entorno base (make_base_env) + reset + N steps aleatorios.
@@ -13,20 +13,18 @@ Niveles de aislamiento (de menor a mayor):
   C) --sb3-init      : construir PPO (sin learn).
   D) --sb3-learn     : construir PPO + learn(total_timesteps) corto.
 
-Opciones que combinan con sb3-init/sb3-learn/check-spaces:
-  --synthetic-env    : usa un entorno Gymnasium SINTÉTICO (NO Duckietown) con
+Opciones:
+  --synthetic-env    : entorno Gymnasium SINTÉTICO (NO Duckietown) con
                        obs Box(0,255,(4,64,64),uint8) y acción Box([0,-1],[1,1]).
   --no-custom-cnn    : PPO con "CnnPolicy" por defecto (NatureCNN), sin CustomCNN.
-  --mlp-policy       : PPO con "MlpPolicy" (solo con --synthetic-env o mock).
+  --mlp-policy       : PPO con "MlpPolicy" (solo con --synthetic-env o --use-mock).
+  --init-order       : env-first (default) construye env real y luego PPO;
+                       model-first construye PPO sobre un env sintético compatible y
+                       luego hace set_env() con el entorno real (prueba si cambiar el
+                       orden torch/SB3 <-> Duckietown evita el segfault).
 
-Pruebas clave:
-  A) synthetic + CnnPolicy + CustomCNN  -> --synthetic-env --sb3-init
-  B) synthetic + CnnPolicy sin CustomCNN-> --synthetic-env --sb3-init --no-custom-cnn
-  C) real + CnnPolicy sin CustomCNN     -> --sb3-init --no-custom-cnn
-  D) real + check-spaces                -> --check-spaces
-
-Cada fase se imprime claramente (reset / step loop / vec reset / sb3 init / sb3 learn);
-la última fase antes del segfault localiza el componente culpable.
+Backends OpenGL: NO se fijan en Python; se prueban como variables de entorno desde el
+notebook (PYOPENGL_PLATFORM=egl | osmesa | sin definir). Ver sección 8C de COLAB_SETUP.md.
 """
 
 from __future__ import annotations
@@ -46,6 +44,11 @@ from src.duckie_factory import gym_duckietown_available, make_base_env
 
 FLUSH = dict(flush=True)
 
+# Bounds del action_space del DuckieWrapper real (src/wrappers.py): Box([-1,-1],[1,1]).
+# El placeholder de model-first debe coincidir EXACTAMENTE para que set_env() valide.
+DUCKIE_ACTION_LOW = np.array([-1.0, -1.0], dtype=np.float32)
+DUCKIE_ACTION_HIGH = np.array([1.0, 1.0], dtype=np.float32)
+
 
 def log(phase: str, msg: str = "") -> None:
     print(f"[fase: {phase}] {msg}", **FLUSH)
@@ -55,19 +58,24 @@ class SyntheticEnv(gym.Env):
     """Entorno Gymnasium sintético con los MISMOS espacios que Duckietown tras
     FrameStack, pero SIN importar ni usar Duckietown/OpenGL.
 
-    obs    = Box(0, 255, (4, 64, 64), uint8)
-    action = Box(low=[0, -1], high=[1, 1], float32)
+    obs = Box(0, 255, (4, 64, 64), uint8). Acción configurable:
+    - por defecto Box([0,-1],[1,1]) (spec de --synthetic-env);
+    - duckie_action=True -> Box([-1,-1],[1,1]) para casar con el DuckieWrapper real
+      (necesario en model-first para que set_env() valide los espacios).
     """
 
     metadata = {"render_modes": []}
 
-    def __init__(self, max_steps: int = 100):
+    def __init__(self, max_steps: int = 100, duckie_action: bool = False):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=config.STACKED_SHAPE, dtype=np.uint8)
-        self.action_space = spaces.Box(
-            low=np.array([0.0, -1.0], dtype=np.float32),
-            high=np.array([1.0, 1.0], dtype=np.float32), dtype=np.float32)
+        if duckie_action:
+            low, high = DUCKIE_ACTION_LOW, DUCKIE_ACTION_HIGH
+        else:
+            low = np.array([0.0, -1.0], dtype=np.float32)
+            high = np.array([1.0, 1.0], dtype=np.float32)
+        self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
         self.max_steps = max_steps
         self._n = 0
 
@@ -107,6 +115,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="PPO con CnnPolicy por defecto, sin CustomCNN.")
     p.add_argument("--mlp-policy", action="store_true",
                    help="PPO con MlpPolicy (solo con --synthetic-env o --use-mock).")
+    p.add_argument("--init-order", default="env-first",
+                   choices=["env-first", "model-first"],
+                   help="env-first: env real -> PPO. model-first: PPO sobre env "
+                        "sintético -> set_env(real).")
     p.add_argument("--device", default="cpu", choices=["auto", "cpu", "cuda"])
     return p.parse_args(argv)
 
@@ -125,17 +137,22 @@ def _sample_base_action(env) -> np.ndarray:
     return np.random.uniform(-1.0, 1.0, size=2).astype(np.float32)
 
 
+def _build_real_env(args):
+    """build_vec_env real/mock (Duckietown). NO sintético."""
+    from src.envs import build_vec_env
+    use_mock = True if args.use_mock else None
+    return build_vec_env([args.map], discrete=False, use_mock=use_mock,
+                         n_stack=config.N_STACK, allow_eval=False)
+
+
 def _build_sb3_env(args):
-    """Devuelve un VecEnv: sintético (sin Duckietown) o build_vec_env real/mock."""
+    """VecEnv para los modos sb3: sintético (sin Duckietown) o real/mock."""
     from stable_baselines3.common.vec_env import DummyVecEnv
     if args.synthetic_env:
         log("vec reset", "construyendo entorno SINTÉTICO (sin Duckietown)...")
         return DummyVecEnv([lambda: SyntheticEnv()])
-    from src.envs import build_vec_env
-    use_mock = True if args.use_mock else None
     log("vec reset", "construyendo build_vec_env (Duckietown real/mock)...")
-    return build_vec_env([args.map], discrete=False, use_mock=use_mock,
-                         n_stack=config.N_STACK, allow_eval=False)
+    return _build_real_env(args)
 
 
 def _describe_policy(args) -> str:
@@ -151,7 +168,7 @@ def _make_ppo(args, venv):
     kwargs = dict(n_steps=64, batch_size=64, n_epochs=1,
                   device=args.device, verbose=1)
     if args.mlp_policy:
-        if not (args.synthetic_env or args.use_mock):
+        if not (args.synthetic_env or args.use_mock or args.init_order == "model-first"):
             raise ValueError("--mlp-policy solo con --synthetic-env o --use-mock.")
         policy = "MlpPolicy"
     elif args.no_custom_cnn:
@@ -232,7 +249,40 @@ def mode_check_spaces(args) -> None:
         venv.close()
 
 
+def _sb3_model_first(args, learn: bool) -> None:
+    """model-first: PPO sobre un env sintético compatible, luego set_env(real)."""
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    log("init", f"model-first | learn={learn} | policy=[{_describe_policy(args)}]")
+    log("vec reset", "construyendo PLACEHOLDER sintético (espacios del DuckieWrapper)...")
+    placeholder = DummyVecEnv([lambda: SyntheticEnv(duckie_action=True)])
+    model = _make_ppo(args, placeholder)  # PPO/torch se inicializan ANTES de tocar Duckietown
+    placeholder.close()
+
+    log("vec reset", "construyendo entorno REAL Duckietown...")
+    real = _build_real_env(args)
+    tmp = os.path.join("models", "_debug_ppo")
+    tmp_zip = tmp + ".zip"
+    try:
+        log("sb3 init", "model.set_env(entorno real Duckietown)...")
+        model.set_env(real)
+        log("sb3 init", "set_env OK")
+        if learn:
+            log("sb3 learn", f"PPO.learn(total_timesteps={args.timesteps})...")
+            model.learn(total_timesteps=args.timesteps)
+            log("sb3 learn", "learn() terminó sin crash")
+            os.makedirs("models", exist_ok=True)
+            model.save(tmp)
+        log("done", "model-first completado sin crash")
+    finally:
+        real.close()
+        if os.path.exists(tmp_zip):
+            os.remove(tmp_zip)
+
+
 def mode_sb3_init(args) -> None:
+    if args.init_order == "model-first":
+        _sb3_model_first(args, learn=False)
+        return
     log("init", f"modo C (sb3-init) | synthetic={args.synthetic_env} | "
                 f"policy=[{_describe_policy(args)}]")
     venv = _build_sb3_env(args)
@@ -244,6 +294,9 @@ def mode_sb3_init(args) -> None:
 
 
 def mode_sb3_learn(args) -> None:
+    if args.init_order == "model-first":
+        _sb3_model_first(args, learn=True)
+        return
     log("init", f"modo D (sb3-learn) | synthetic={args.synthetic_env} | "
                 f"timesteps={args.timesteps} | policy=[{_describe_policy(args)}]")
     venv = _build_sb3_env(args)
@@ -269,7 +322,7 @@ def main(argv=None) -> None:
         _reject_eval_map(args.map)
     print("=" * 64, **FLUSH)
     print(f"DEBUG DUCKIETOWN RUNTIME | gym_duckietown disponible: "
-          f"{gym_duckietown_available()}", **FLUSH)
+          f"{gym_duckietown_available()} | init-order={args.init_order}", **FLUSH)
     print("=" * 64, **FLUSH)
 
     if args.check_spaces:
