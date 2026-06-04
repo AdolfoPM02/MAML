@@ -184,11 +184,36 @@ Esperado: `DuckieWrapper -> (1, 64, 64)` y `build_vec_env -> obs_space (4, 64, 6
 
 ---
 
+## 8A. Diagnóstico runtime de Duckietown (aislar segfaults)
+
+El PPO real crashea con `Segmentation fault (core dumped)` **incluso forzando CPU**, lo
+que indica un fallo NATIVO (Duckietown/OpenGL/pyglet/xvfb), no de CUDA.
+`scripts/debug_duckie_runtime.py` ejecuta niveles crecientes de aislamiento para ver
+**en qué fase** ocurre: step base → VecFrameStack → SB3 init → SB3 learn.
+
+```bash
+%cd /content/MAML
+# A) entorno base + steps reales
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --steps 20 --device cpu
+# B) build_vec_env + VecFrameStack + steps
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --vec --steps 20 --device cpu
+# C) construir PPO con CustomCNN (sin learn)
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --sb3-init --device cpu
+# D) PPO.learn muy corto
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --sb3-learn --timesteps 64 --device cpu
+```
+Cada comando imprime la fase alcanzada (`reset`, `step loop`, `vec reset`, `sb3 init`,
+`sb3 learn`). La última fase impresa antes del segfault localiza el componente culpable.
+**Solo pasa a la sección 8 si el modo D (`--sb3-learn`) termina con `FIN OK`.**
+
+---
+
 ## 8. Entrenar un PPO corto real (CPU forzada)
 
-> En el smoke test real **forzamos CPU**: la combinación Duckietown/OpenGL/xvfb +
-> PyTorch CUDA provoca `Segmentation fault (core dumped)` en Colab (ver troubleshooting).
-> La prioridad del contrato es que **cargue y ejecute**; la GPU se estudia más adelante.
+> **Ejecutar solo si el diagnóstico 8A (`--sb3-learn`) pasó con `FIN OK`.** Si 8A
+> crashea en `sb3 learn`, NO ejecutes esta sección hasta resolver la causa nativa.
+> Forzamos **CPU**: Duckietown/OpenGL/xvfb + PyTorch CUDA provoca segfault (ver
+> troubleshooting). La prioridad del contrato es que **cargue y ejecute**.
 
 ```bash
 %cd /content/MAML
@@ -287,6 +312,13 @@ Duckietown real. La combinación Duckietown/OpenGL/xvfb + PyTorch CUDA crashea e
 `CUDA_VISIBLE_DEVICES=""` (`!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY}
 ...`). La GPU se podrá estudiar más adelante; la prioridad del contrato es que el
 modelo **cargue y ejecute**.
+
+**`Using cpu device` → `Segmentation fault (core dumped)`** (el segfault persiste en
+CPU). **No es CUDA**: es un fallo nativo, probablemente de Duckietown/OpenGL/pyglet/xvfb
+durante `step`/`learn`. → Usar `scripts/debug_duckie_runtime.py` (sección 8A) para
+aislar si falla en el step real (modo A), en VecFrameStack (B), en la construcción de
+SB3 (C) o en `learn` (D). La última fase impresa antes del segfault indica el componente.
+No ejecutar la sección 8 (PPO real) hasta que el modo D termine con `FIN OK`.
 
 **OpenGL / display.**
 - Confirmar `xvfb python3-opengl freeglut3-dev` instalados; lanzar con `xvfb-run -a`.
