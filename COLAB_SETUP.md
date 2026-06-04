@@ -47,6 +47,10 @@ real del notebook:
 
 ## 1. Clonar el repositorio en `/content/MAML`
 
+> **Siempre** `%cd /content` antes de `rm -rf /content/MAML`: si una celda previa dejó
+> el cwd dentro de `/content/MAML`, borrar ese directorio dejaría el shell en una ruta
+> inexistente (ver troubleshooting: `getcwd: cannot access parent directories`).
+
 **Si el repo es PRIVADO** (el PAT debe tener scope **`repo`**):
 ```python
 from getpass import getpass
@@ -55,6 +59,7 @@ import os
 token = getpass("GitHub PAT con permiso repo: ")
 repo_url = f"https://AdolfoPM02:{token}@github.com/AdolfoPM02/MAML.git"
 
+%cd /content
 !rm -rf /content/MAML
 !git clone {repo_url} /content/MAML
 %cd /content/MAML
@@ -67,6 +72,7 @@ repo_url = f"https://AdolfoPM02:{token}@github.com/AdolfoPM02/MAML.git"
 **Alternativa recomendada — repo PÚBLICO temporal** (sin PAT, más simple y sin riesgo
 de filtrar el token):
 ```python
+%cd /content
 !rm -rf /content/MAML
 !git clone https://github.com/AdolfoPM02/MAML.git /content/MAML
 %cd /content/MAML
@@ -255,6 +261,12 @@ repo público temporalmente. Confirmar con `!ls scripts` tras clonar.
 
 **`can't open file '/content/...py'`.** No estás en `/content/MAML`. Ejecutar
 `%cd /content/MAML` (está al inicio de cada celda de ejecución).
+
+**`getcwd: cannot access parent directories` / `Unable to read current working
+directory` / `[Errno 2] No such file or directory: '/content/MAML'`.** Reejecutaste la
+celda de clonado estando **dentro** de `/content/MAML` y `rm -rf /content/MAML` borró el
+directorio actual del shell. → Hacer **siempre** `%cd /content` antes de
+`rm -rf /content/MAML` (ya incluido en las celdas de clonado).
 
 **`Key backend: '...backend_inline' is not a valid value`.** Falta `MPLBACKEND=Agg`.
 Está como celda (`os.environ["MPLBACKEND"]="Agg"`) y como prefijo de cada comando `{PY}`.
