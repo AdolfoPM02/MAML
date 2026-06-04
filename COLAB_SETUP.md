@@ -208,10 +208,43 @@ Cada comando imprime la fase alcanzada (`reset`, `step loop`, `vec reset`, `sb3 
 
 ---
 
+## 8B. Diagnóstico SB3 init (el crash ocurre al construir PPO)
+
+El diagnóstico 8A mostró que el segfault ocurre en la fase **`sb3 init`** (construir PPO
+con el entorno real), no en step/VecFrameStack/learn. Estos comandos separan **SB3/torch/
+CNN** del **entorno real**, usando un entorno SINTÉTICO con espacios idénticos:
+
+```bash
+%cd /content/MAML
+# A) synthetic + CnnPolicy + CustomCNN  (¿SB3 + nuestra CNN + spaces están bien?)
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --synthetic-env --sb3-init --device cpu
+# B) synthetic + CnnPolicy SIN CustomCNN  (¿influye CustomCNN?)
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --synthetic-env --sb3-init --no-custom-cnn --device cpu
+# D) Duckietown real: solo imprimir spaces/reset (sin PPO)
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --check-spaces --device cpu
+# C) Duckietown real + CnnPolicy SIN CustomCNN  (¿depende de CustomCNN o del entorno real?)
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/debug_duckie_runtime.py --sb3-init --no-custom-cnn --device cpu
+```
+
+**Interpretación:**
+- **A pasa** → SB3 + CustomCNN + spaces están bien (el problema NO es nuestra CNN ni SB3).
+- **A falla** → el problema está en SB3/torch/CNN/versiones (no en Duckietown).
+- **C falla** (real sin CustomCNN) → el fallo está en el **entorno real + SB3 init**, no en
+  CustomCNN. Apunta a la interacción entre el contexto OpenGL/pyglet de Duckietown y la
+  inicialización de torch (p. ej. orden de import, hilos, contexto GL global).
+- **check-spaces raro** (dtype/shape/low/high inesperados) → corregir espacios/wrappers.
+
+> Pista típica para C-falla: el contexto OpenGL de Duckietown y la inicialización de
+> torch pueden chocar. Posibles vías a probar en una iteración posterior: construir el
+> entorno **después** de importar torch, o crear PPO **antes** de tocar el render, o
+> aislar el render con `PYOPENGL_PLATFORM`.
+
+---
+
 ## 8. Entrenar un PPO corto real (CPU forzada)
 
-> **Ejecutar solo si el diagnóstico 8A (`--sb3-learn`) pasó con `FIN OK`.** Si 8A
-> crashea en `sb3 learn`, NO ejecutes esta sección hasta resolver la causa nativa.
+> **Ejecutar solo si los diagnósticos 8A (`--sb3-learn`) y 8B no crashean.** Si 8B revela
+> que el crash es del entorno real + SB3 init, NO ejecutes esta sección hasta resolverlo.
 > Forzamos **CPU**: Duckietown/OpenGL/xvfb + PyTorch CUDA provoca segfault (ver
 > troubleshooting). La prioridad del contrato es que **cargue y ejecute**.
 
