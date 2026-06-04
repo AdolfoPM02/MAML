@@ -178,26 +178,50 @@ Esperado: `DuckieWrapper -> (1, 64, 64)` y `build_vec_env -> obs_space (4, 64, 6
 
 ---
 
-## 8. Entrenar un PPO corto real
+## 8. Entrenar un PPO corto real (CPU forzada)
+
+> En el smoke test real **forzamos CPU**: la combinación Duckietown/OpenGL/xvfb +
+> PyTorch CUDA provoca `Segmentation fault (core dumped)` en Colab (ver troubleshooting).
+> La prioridad del contrato es que **cargue y ejecute**; la GPU se estudia más adelante.
 
 ```bash
 %cd /content/MAML
-!MPLBACKEND=Agg xvfb-run -a {PY} train.py --algo ppo --map Duckietown-loop_empty-v0 \
-     --timesteps 5000 --output ppo_colab_test
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} train.py \
+  --algo ppo \
+  --map Duckietown-loop_empty-v0 \
+  --timesteps 512 \
+  --output ppo_colab_test \
+  --device cpu
 ```
-Genera `models/ppo_colab_test.zip`. (Con GPU, `--device auto` la usará.)
+Comprobar que el modelo se guardó:
+```bash
+!ls -lh models/
+```
+Debe aparecer `ppo_colab_test.zip`. Si no está, la sección 8 crasheó antes de guardar.
 
 ---
 
-## 9. Evaluar el modelo real
+## 9. Evaluar el modelo real (CPU forzada)
+
+> **Ejecutar solo si existe `models/ppo_colab_test.zip`** (confirmado en el paso 8 con
+> `ls -lh models/`). Si la sección 8 crasheó, este paso dará
+> `FileNotFoundError: models/ppo_colab_test.zip`.
 
 ```bash
 %cd /content/MAML
-!MPLBACKEND=Agg xvfb-run -a {PY} eval.py --algo ppo --model models/ppo_colab_test \
-     --map Duckietown-loop_empty-v0 --episodes 3
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} eval.py \
+  --algo ppo \
+  --model models/ppo_colab_test \
+  --map Duckietown-loop_empty-v0 \
+  --episodes 1 \
+  --device cpu
 # Prueba del contrato en el mapa oculto (solo evaluación):
-!MPLBACKEND=Agg xvfb-run -a {PY} eval.py --algo ppo --model models/ppo_colab_test \
-     --map Duckietown-loop_obstacles-v0 --episodes 3 --allow-eval
+!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} eval.py \
+  --algo ppo \
+  --model models/ppo_colab_test \
+  --map Duckietown-loop_obstacles-v0 \
+  --episodes 1 --allow-eval \
+  --device cpu
 ```
 Imprime recompensa acumulada media ± std y longitud media. El entrenamiento en
 `loop_obstacles` sigue bloqueado (solo `--allow-eval` lo habilita, y solo para evaluar).
@@ -244,6 +268,13 @@ y re-fijar `numpy==1.26.4`.
 **numpy se rompe / `gym_duckietown` no importa.** Reejecutar el paso 3e
 (`numpy==1.26.4 --force-reinstall --no-deps`) y `!{PY} -c "import numpy; print(numpy.__version__)"`.
 Verificar numpy tras cada bloque de instalación.
+
+**`Using cuda device` → `Segmentation fault (core dumped)`** al entrenar/evaluar
+Duckietown real. La combinación Duckietown/OpenGL/xvfb + PyTorch CUDA crashea en Colab.
+→ Forzar **CPU** en los smoke tests reales: `--device cpu` y anteponer
+`CUDA_VISIBLE_DEVICES=""` (`!env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY}
+...`). La GPU se podrá estudiar más adelante; la prioridad del contrato es que el
+modelo **cargue y ejecute**.
 
 **OpenGL / display.**
 - Confirmar `xvfb python3-opengl freeglut3-dev` instalados; lanzar con `xvfb-run -a`.
