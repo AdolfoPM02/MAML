@@ -66,7 +66,27 @@ class DuckieWrapper(gym.Env):
         obs = self.env.reset()
         return self._process_obs(obs), {}
 
+    def _normalize_action(self, action) -> np.ndarray:
+        """Normaliza la acción a un vector PLANO de 2 escalares [velocidad, giro].
+
+        SB3 / DummyVecEnv puede entregar la acción con una dimensión extra (p. ej.
+        forma (1, 2) en vez de (2,)), lo que rompe la dinámica de Duckietown con
+        `ValueError: setting an array element with a sequence`. Duckietown requiere
+        exactamente dos escalares. Aplanamos, validamos y recortamos a rango válido:
+        velocidad en [0, 1] y giro en [-1, 1].
+        """
+        a = np.asarray(action, dtype=np.float32).reshape(-1)
+        if a.shape[0] != 2:
+            raise ValueError(
+                f"La acción de Duckietown debe tener 2 valores [velocidad, giro]; "
+                f"recibido shape {np.asarray(action).shape} -> {a.shape}"
+            )
+        speed = float(np.clip(a[0], 0.0, 1.0))
+        steering = float(np.clip(a[1], -1.0, 1.0))
+        return np.array([speed, steering], dtype=np.float32)
+
     def step(self, action):
+        action = self._normalize_action(action)
         obs, reward, done, info = self.env.step(action)
         # gym antiguo (4-tupla) -> gymnasium (5-tupla). El entorno base solo expone
         # 'done'; lo tratamos como 'terminated' y dejamos 'truncated' a la capa de

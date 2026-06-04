@@ -69,6 +69,19 @@ def main() -> None:
               f"{label}: step obs {obs2.shape}, 5-tupla OK (r={reward:.2f})")
         env.close()
 
+    # 5b. Robustez de forma de acción en DuckieWrapper.step -------------------
+    # SB3/DummyVecEnv puede entregar la acción con dimensión extra; DuckieWrapper
+    # debe aplanarla a un vector (2,) antes de pasarla a Duckietown.
+    env = DuckieWrapper(config.TRAIN_MAPS[0], use_mock=USE_MOCK)
+    env.reset()
+    for a in [np.array([0.2, 0.1], dtype=np.float32),   # (2,)
+              np.array([[0.2, 0.1]], dtype=np.float32),  # (1, 2) estilo VecEnv
+              [0.2, 0.1]]:                                # lista
+        o, *_ = env.step(a)
+        check(o.shape == config.OBS_SHAPE,
+              f"step acepta acción shape {np.asarray(a).shape} -> obs {o.shape}")
+    env.close()
+
     # 6. VecFrameStack -> (4, 64, 64) -----------------------------------------
     vec_cont = build_vec_env(config.TRAIN_MAPS, discrete=False, use_mock=USE_MOCK)
     check(vec_cont.observation_space.shape == config.STACKED_SHAPE,

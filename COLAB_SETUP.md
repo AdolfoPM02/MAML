@@ -392,6 +392,13 @@ aislar si falla en el step real (modo A), en VecFrameStack (B), en la construcci
 SB3 (C) o en `learn` (D). La última fase impresa antes del segfault indica el componente.
 No ejecutar la sección 8 (PPO real) hasta que el modo D termine con `FIN OK`.
 
+**`ValueError: setting an array element with a sequence`** dentro de `env.step` de
+Duckietown (en `pwm_dynamics`/`se2_from_linear_angular`). **Causa**: SB3/DummyVecEnv
+entrega la acción con una dimensión extra (p. ej. `(1, 2)`); Duckietown espera un vector
+plano de 2 escalares `[velocidad, giro]`. **Solución**: ya resuelto —
+`DuckieWrapper.step` normaliza la acción a `(2,)` (aplana, valida 2 valores y recorta
+velocidad a `[0,1]` y giro a `[-1,1]`) antes de llamar a `self.env.step`.
+
 **OpenGL / display.**
 - Confirmar `xvfb python3-opengl freeglut3-dev` instalados; lanzar con `xvfb-run -a`.
 - Alternativa: `pyvirtualdisplay.Display(visible=False, size=(1024,768)).start()`.
