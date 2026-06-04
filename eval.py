@@ -25,12 +25,49 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 from stable_baselines3 import DQN, PPO, SAC
+import gymnasium as gym
+from gymnasium import spaces
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 from src import config
 from src.envs import build_vec_env
 
 ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "sac": SAC}
+
+
+class _PlaceholderEnv(gym.Env):
+    """Entorno sintético (sin Duckietown) con los MISMOS espacios que el entorno real
+    tras FrameStack, usado por el flujo `model-first`: el modelo se carga sobre este
+    placeholder ANTES de crear Duckietown, y luego se hace `set_env(real)`.
+
+    obs    = Box(0, 255, (n_stack, 64, 64), uint8)
+    action = Discrete(len(DISCRETE_ACTIONS))    si discrete (DQN)
+             Box(-1, 1, (2,), float32)          si continuo (PPO/SAC)
+    """
+
+    metadata = {"render_modes": []}
+
+    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100):
+        super().__init__()
+        self.observation_space = spaces.Box(
+            low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
+        if discrete:
+            self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
+        else:
+            self.action_space = spaces.Box(
+                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        self.max_steps = max_steps
+        self._n = 0
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self._n = 0
+        return self.observation_space.sample(), {}
+
+    def step(self, action):
+        self._n += 1
+        return self.observation_space.sample(), 0.0, False, self._n >= self.max_steps, {}
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -51,6 +88,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "bloqueado por el guard de make_env.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    p.add_argument("--init-order", default="env-first",
+                   choices=["env-first", "model-first"],
+                   help="env-first (default): crea el env real y luego carga el modelo. "
+                        "model-first: carga el modelo sobre un env sintético y luego "
+                        "set_env(real) — evita el segfault de SB3 + Duckietown real.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
     p.add_argument("--deterministic", dest="deterministic", action="store_true",
                    default=True, help="Política determinista (default).")
@@ -64,11 +106,26 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def evaluate(args: argparse.Namespace) -> dict:
     discrete = args.algo == "dqn"
-    env = build_vec_env([args.map], discrete=discrete, use_mock=(args.use_mock or None),
-                        seed=args.seed, n_stack=args.n_stack,
-                        allow_eval=args.allow_eval)  # GUARD: bloquea EVAL_MAP sin allow_eval
+    cls = ALGO_CLASSES[args.algo]
 
-    model = ALGO_CLASSES[args.algo].load(args.model, env=env, device=args.device)
+    if args.init_order == "model-first":
+        # Cargar el modelo sobre un env SINTÉTICO (sin Duckietown) y luego set_env(real).
+        # Evita el segfault de cargar/usar SB3 con Duckietown real directamente.
+        placeholder = DummyVecEnv(
+            [lambda: _PlaceholderEnv(discrete, args.n_stack)])
+        model = cls.load(args.model, env=placeholder, device=args.device)
+        env = build_vec_env([args.map], discrete=discrete,
+                            use_mock=(args.use_mock or None), seed=args.seed,
+                            n_stack=args.n_stack, allow_eval=args.allow_eval)
+        model.set_env(env)
+        placeholder.close()
+    else:
+        # env-first (default): crear el entorno real y cargar el modelo con él.
+        env = build_vec_env([args.map], discrete=discrete,
+                            use_mock=(args.use_mock or None), seed=args.seed,
+                            n_stack=args.n_stack,
+                            allow_eval=args.allow_eval)  # GUARD: bloquea EVAL_MAP sin allow_eval
+        model = cls.load(args.model, env=env, device=args.device)
 
     rewards, lengths = evaluate_policy(
         model, env, n_eval_episodes=args.episodes,
@@ -96,7 +153,8 @@ def main(argv=None) -> None:
     print("=" * 64)
     print(f"EVAL | algo={args.algo} | model={args.model} | map={args.map}")
     print(f"     | episodes={args.episodes} | mock={args.use_mock} | "
-          f"allow_eval={args.allow_eval} | deterministic={args.deterministic}")
+          f"allow_eval={args.allow_eval} | deterministic={args.deterministic} | "
+          f"init-order={args.init_order}")
     print("=" * 64)
 
     m = evaluate(args)

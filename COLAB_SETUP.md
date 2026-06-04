@@ -362,12 +362,15 @@ Debe aparecer `ppo_colab_test.zip`. Si no está, la sección 8 crasheó antes de
 
 ---
 
-## 9. Evaluar el modelo real (CPU forzada)
+## 9. Evaluar el modelo real (CPU forzada, `--init-order model-first`)
 
-> **Ejecutar solo si existe `models/ppo_colab_test.zip`** (confirmado en el paso 8 con
-> `ls -lh models/`). Si la sección 8 crasheó, este paso dará
-> `FileNotFoundError: models/ppo_colab_test.zip`.
+> **Usar `--init-order model-first` también al evaluar.** `train.py` ya guarda el
+> modelo correctamente; el siguiente riesgo era la **carga/evaluación con env-first**,
+> que reproduce el segfault de SB3 + Duckietown real. `eval.py` carga el modelo sobre un
+> env sintético y luego `set_env(real)`.
+> **Ejecutar solo si existe `models/ppo_colab_test.zip`** (paso 8 con `ls -lh models/`).
 
+**9.1 — Primero el mapa permitido `Duckietown-loop_empty-v0`:**
 ```bash
 %cd /content/MAML
 !env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} eval.py \
@@ -375,17 +378,23 @@ Debe aparecer `ppo_colab_test.zip`. Si no está, la sección 8 crasheó antes de
   --model models/ppo_colab_test \
   --map Duckietown-loop_empty-v0 \
   --episodes 1 \
-  --device cpu
-# Prueba del contrato en el mapa oculto (solo evaluación):
+  --device cpu \
+  --init-order model-first
+```
+
+**9.2 — Solo si 9.1 pasa, el mapa oculto (SOLO evaluación, nunca entrenamiento):**
+```bash
+%cd /content/MAML
 !env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} eval.py \
   --algo ppo \
   --model models/ppo_colab_test \
   --map Duckietown-loop_obstacles-v0 \
   --episodes 1 --allow-eval \
-  --device cpu
+  --device cpu \
+  --init-order model-first
 ```
-Imprime recompensa acumulada media ± std y longitud media. El entrenamiento en
-`loop_obstacles` sigue bloqueado (solo `--allow-eval` lo habilita, y solo para evaluar).
+Imprime recompensa acumulada media ± std y longitud media. `loop_obstacles` está
+bloqueado para entrenar; `--allow-eval` solo lo habilita para **evaluación**.
 
 ---
 
