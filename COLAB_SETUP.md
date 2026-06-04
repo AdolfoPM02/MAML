@@ -138,6 +138,63 @@ PY=/content/venv-maml/bin/python
 
 ---
 
+## 3-bis. Stack recomendado por compañero (ALTERNATIVA PRINCIPAL)
+
+Stack con versiones **más conservadoras** que a un compañero le funciona end-to-end con
+Duckietown. **Probar en un runtime LIMPIO**, NO encima del venv del paso 3:
+
+> **Importante:** reinicia el runtime de Colab (Entorno de ejecución → Reiniciar) y
+> vuelve a ejecutar los pasos 1 y 2 (clonar + crear venv 3.11) **antes** de este bloque.
+> Usa el paso 3 **o** el paso 3-bis, **nunca los dos** sobre el mismo venv.
+
+Diferencias clave frente al paso 3:
+- `stable-baselines3==2.2.1`, `gymnasium==0.29.1`, `gym==0.25.2`, `numpy==1.23.5`,
+  `pyglet==1.5.27` (todo más conservador).
+- **`opencv-python-headless`** sustituye a `opencv-python` (sin libs de GUI; `import cv2`
+  sigue funcionando igual en nuestro código).
+- El paquete correcto de zuper-ipce es **`zuper-ipce-z6`** (NO `zuper-ipce`, que no existe
+  en PyPI).
+
+```bash
+PY=/content/venv-maml/bin/python
+# Stack del compañero con pins EXACTOS
+!{PY} -m pip install \
+  "stable-baselines3==2.2.1" \
+  "gymnasium==0.29.1" \
+  "torch==2.12.0" \
+  "numpy==1.23.5" \
+  "gym==0.25.2" \
+  "pyglet==1.5.27" \
+  "opencv-python-headless==4.11.0.86" \
+  "scikit-image==0.24.0" \
+  "scipy==1.15.3" \
+  "pyzmq==27.1.0" \
+  "PyYAML==6.0.3" \
+  "Pillow==12.2.0" \
+  "imageio==2.37.3" \
+  "imageio-ffmpeg==0.6.0" \
+  "pyvirtualdisplay==3.0" \
+  "zuper-commons-z6==6.2.4" \
+  "zuper-ipce-z6==6.1.2" \
+  "zuper-nodes-z6==6.2.17" \
+  "zuper-typing-z6==6.2.3" \
+  "PyGeometry-z6==2.1.5" \
+  "carnivalmirror==0.6.2" \
+  "aido-protocols-daffy==6.1.1" \
+  "duckietown-serialization-ds1==1.1.1" \
+  "duckietown-world-daffy==6.4.3" \
+  "pycontracts3==7.2"
+# gym-duckietown SIN deps (sus dependencias ya van pinneadas arriba)
+!{PY} -m pip install --no-deps "git+https://github.com/duckietown/gym-duckietown.git@daffy"
+```
+
+Tras instalar este stack, continúa con los **mismos pasos 4 → 9** (verificar imports,
+smoke mock, `check_duckie_real.py`, diagnósticos 8A/8B/8C y, si procede, el PPO corto).
+Sigue siendo **candidato**: el `requirements.txt` definitivo (paso 10) solo se cierra si
+el stack funciona end-to-end.
+
+---
+
 ## 4. Verificar imports (gym **y** gymnasium)
 
 ```bash
