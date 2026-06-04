@@ -32,12 +32,51 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from stable_baselines3 import DQN, PPO, SAC
 from stable_baselines3.common.logger import configure
 
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+from stable_baselines3.common.vec_env import DummyVecEnv
+
 from src import config
 from src.cnn import CustomCNN
 from src.envs import build_vec_env
 
 MODELS_DIR = "models"
 DEFAULT_LOG_DIR = "logs"
+
+
+class _PlaceholderEnv(gym.Env):
+    """Entorno sintético (sin Duckietown) con los MISMOS espacios que el entorno real
+    tras FrameStack, usado por el flujo `model-first`: se construye el modelo SB3 sobre
+    este placeholder ANTES de crear Duckietown, y luego se hace `set_env(real)`.
+
+    obs    = Box(0, 255, (n_stack, 64, 64), uint8)
+    action = Discrete(len(DISCRETE_ACTIONS))    si discrete (DQN)
+             Box(-1, 1, (2,), float32)          si continuo (PPO/SAC)
+    """
+
+    metadata = {"render_modes": []}
+
+    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100):
+        super().__init__()
+        self.observation_space = spaces.Box(
+            low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
+        if discrete:
+            self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
+        else:
+            self.action_space = spaces.Box(
+                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        self.max_steps = max_steps
+        self._n = 0
+
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self._n = 0
+        return self.observation_space.sample(), {}
+
+    def step(self, action):
+        self._n += 1
+        return self.observation_space.sample(), 0.0, False, self._n >= self.max_steps, {}
 
 
 # --------------------------------------------------------------------------- #
@@ -128,6 +167,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--smoke", action="store_true",
                    help="Corrida mínima: timesteps≈512 y buffers diminutos.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    p.add_argument("--init-order", default="env-first",
+                   choices=["env-first", "model-first"],
+                   help="env-first (default): crea el env real y luego el modelo. "
+                        "model-first: crea el modelo sobre un env sintético y luego "
+                        "set_env(real) — evita el segfault de SB3 init con Duckietown.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
@@ -144,21 +188,38 @@ def main(argv=None) -> None:
 
     print("=" * 64)
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")
-    print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device}")
+    print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device} "
+          f"| init-order={args.init_order}")
     print("=" * 64)
-
-    # Entorno vectorizado con FrameStack -> (n_stack, 64, 64). GUARD incluido.
-    env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
-                        seed=args.seed, n_stack=args.n_stack)
 
     policy_kwargs = dict(
         features_extractor_class=CustomCNN,
         features_extractor_kwargs=dict(features_dim=args.features_dim),
     )
-    model = spec["cls"](
-        "CnnPolicy", env, policy_kwargs=policy_kwargs, seed=args.seed,
-        device=args.device, verbose=1, **spec["hyperparams"],
-    )
+
+    if args.init_order == "model-first":
+        # Construir el modelo SB3 sobre un env SINTÉTICO (sin Duckietown) y luego
+        # set_env(real). Evita el segfault de inicializar PPO/torch con Duckietown.
+        placeholder = DummyVecEnv(
+            [lambda: _PlaceholderEnv(spec["discrete"], args.n_stack)])
+        model = spec["cls"](
+            "CnnPolicy", placeholder, policy_kwargs=policy_kwargs, seed=args.seed,
+            device=args.device, verbose=1, **spec["hyperparams"],
+        )
+        print("[model-first] modelo construido sobre env sintético; creando Duckietown...")
+        env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
+                            seed=args.seed, n_stack=args.n_stack)
+        model.set_env(env)
+        placeholder.close()
+        print("[model-first] set_env(entorno real) OK")
+    else:
+        # env-first (default): crear el entorno real y luego el modelo.
+        env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
+                            seed=args.seed, n_stack=args.n_stack)
+        model = spec["cls"](
+            "CnnPolicy", env, policy_kwargs=policy_kwargs, seed=args.seed,
+            device=args.device, verbose=1, **spec["hyperparams"],
+        )
 
     # Logger nativo SB3: stdout + CSV (sin dependencias nuevas).
     log_path = os.path.join(args.log_dir, args.algo)

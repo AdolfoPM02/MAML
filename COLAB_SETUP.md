@@ -327,8 +327,8 @@ sobre un env sintético compatible y luego `set_env(real)`):
 - Si **EGL** o **OSMesa** dan `FIN OK` → usar ese `PYOPENGL_PLATFORM` también al entrenar
   (anteponerlo en los comandos de la sección 8).
 - Si **model-first** da `FIN OK` (`set_env OK`) → la solución es inicializar PPO antes de
-  tocar Duckietown; en una fase posterior se adaptará `train.py` para soportar ese flujo
-  (NO se toca `train.py` todavía).
+  tocar Duckietown. **`train.py` ya soporta `--init-order model-first`** (construye el
+  modelo sobre un env sintético y luego `set_env(real)`); la sección 8 lo usa.
 - Si **todo** sigue en segfault → el fallo está en la integración nativa SB3+Duckietown
   en Colab (xvfb/pyglet/OpenGL). **Plan B**: documentar y considerar alternativas (otro
   runtime/imagen, `gym-duckietown` en proceso separado del de entrenamiento, o reducir el
@@ -336,13 +336,13 @@ sobre un env sintético compatible y luego `set_env(real)`):
 
 ---
 
-## 8. Entrenar un PPO corto real (CPU forzada)
+## 8. Entrenar un PPO corto real (CPU forzada, `--init-order model-first`)
 
-> **Ejecutar solo si los diagnósticos 8A/8B/8C no crashean** (con el `PYOPENGL_PLATFORM`
-> y/o `--init-order` que haya resultado estable en 8C). Si todo crashea, ver el Plan B
-> de 8C antes de continuar.
-> Forzamos **CPU**: Duckietown/OpenGL/xvfb + PyTorch CUDA provoca segfault (ver
-> troubleshooting). La prioridad del contrato es que **cargue y ejecute**.
+> **Usar `--init-order model-first`.** El diagnóstico 8C confirmó que `env-first`
+> (crear Duckietown y luego PPO) produce `Segmentation fault`, mientras que
+> `model-first` (construir PPO sobre un env sintético y luego `model.set_env(real)`)
+> da `set_env OK` y entrena sin crash. `train.py` ya soporta este flujo.
+> Mantener CPU forzada (`--device cpu` + `CUDA_VISIBLE_DEVICES=""`).
 
 ```bash
 %cd /content/MAML
@@ -351,7 +351,8 @@ sobre un env sintético compatible y luego `set_env(real)`):
   --map Duckietown-loop_empty-v0 \
   --timesteps 512 \
   --output ppo_colab_test \
-  --device cpu
+  --device cpu \
+  --init-order model-first
 ```
 Comprobar que el modelo se guardó:
 ```bash
