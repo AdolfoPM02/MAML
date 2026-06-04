@@ -398,6 +398,26 @@ bloqueado para entrenar; `--allow-eval` solo lo habilita para **evaluación**.
 
 ---
 
+## 9-bis. Entrenamiento real controlado
+
+Una vez validado el ciclo, usa `scripts/run_training_plan.py` para entrenar de forma
+ordenada (compone los comandos con CPU + `model-first` + xvfb). Protocolo completo,
+tabla de resultados y criterio de selección en **`EXPERIMENTS.md`**.
+
+```bash
+%cd /content/MAML
+# Ver el comando sin ejecutar:
+!python scripts/run_training_plan.py --stage ppo20k --dry-run
+# Entrenar + evaluar (loop_empty y small_loop):
+!python scripts/run_training_plan.py --stage ppo20k --execute --eval-after
+# Entrenar + evaluar incluyendo el mapa oculto (solo evaluación):
+!python scripts/run_training_plan.py --stage ppo50k --execute --eval-after --allow-eval-hidden
+```
+El lanzador **impide entrenar** en `loop_obstacles` (ValueError); ese mapa solo se evalúa
+con `--allow-eval-hidden`.
+
+---
+
 ## 10. Preparar la entrega (cuando el entrenamiento completo esté listo)
 
 > **Aún no se hace**: requiere el entrenamiento real completo. Documentado para después.
