@@ -138,10 +138,12 @@ PY=/content/venv-maml/bin/python
 
 ---
 
-## 3-bis. Stack recomendado por compañero (ALTERNATIVA PRINCIPAL)
+## 3-bis. Stack recomendado (STACK PRINCIPAL — VALIDADO)
 
-Stack con versiones **más conservadoras** que a un compañero le funciona end-to-end con
-Duckietown. **Probar en un runtime LIMPIO**, NO encima del venv del paso 3:
+✅ **Stack principal recomendado.** Versiones conservadoras validadas end-to-end con
+Duckietown real en Colab (imports → train PPO real → guardar → eval en mapa permitido y
+mapa oculto). Usa este paso, no el paso 3 (que queda como variante moderna alternativa).
+**Probar en un runtime LIMPIO**, NO encima del venv del paso 3:
 
 > **Importante:** reinicia el runtime de Colab (Entorno de ejecución → Reiniciar) y
 > vuelve a ejecutar los pasos 1 y 2 (clonar + crear venv 3.11) **antes** de este bloque.
@@ -395,6 +397,20 @@ Debe aparecer `ppo_colab_test.zip`. Si no está, la sección 8 crasheó antes de
 ```
 Imprime recompensa acumulada media ± std y longitud media. `loop_obstacles` está
 bloqueado para entrenar; `--allow-eval` solo lo habilita para **evaluación**.
+
+> ✅ **Flujo `model-first` VALIDADO** como solución al `Segmentation fault` de SB3 +
+> Duckietown real: con el stack 3-bis, `train.py` y `eval.py` con `--init-order
+> model-first` completan el ciclo (train → guardar → eval) sin crash.
+>
+> **Resultados del smoke final real (NO es el modelo final):** PPO corto real guardó
+> `models/ppo_colab_test.zip`. Evaluación:
+> - `loop_empty`: recompensa media **1069.321**, longitud media **1500.0**.
+> - `loop_obstacles`: recompensa media **600.820**, longitud media **1500.0**.
+>
+> Son cifras de **smoke test** (entrenamiento mínimo), no del entrenamiento final. El
+> siguiente paso es entrenar de forma controlada con `scripts/run_training_plan.py`
+> (stages `ppo20k`, `ppo50k`, `dqn20k`/`dqn50k`, `sac20k`/`sac50k`) — ver §9-bis y
+> `EXPERIMENTS.md`.
 
 ---
 

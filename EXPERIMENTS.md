@@ -14,6 +14,34 @@ registrar resultados y elegir el `best_duckie_agent.zip` final. El lanzador
 3. Verificar imports (§4) y que `check_duckie_real.py` (§7) pasa.
 4. **No** es necesario repetir todos los smoke tests en cada entrenamiento.
 
+## Smoke real validado en Colab (baseline inicial de funcionamiento)
+
+El ciclo completo está **validado** con el stack principal (§3-bis) y `--init-order
+model-first`: Duckietown real → `train.py` → PPO learn → guardar → `eval.py` → evaluar
+en mapa permitido y mapa oculto. Resultados del smoke (PPO corto real,
+`models/ppo_colab_test.zip`):
+
+| Mapa                         | Recompensa media | Longitud media |
+|------------------------------|------------------|----------------|
+| Duckietown-loop_empty-v0     | 1069.321         | 1500.0         |
+| Duckietown-loop_obstacles-v0 | 600.820          | 1500.0         |
+
+> ⚠️ Es un **baseline inicial de funcionamiento** (entrenamiento mínimo), **no el modelo
+> final**. Sirve para confirmar que el pipeline end-to-end funciona; los modelos
+> entregables salen de los entrenamientos controlados de abajo.
+
+## Protocolo de entrenamiento controlado (orden recomendado)
+a) En Colab, **`git pull origin main`** dentro de `/content/MAML` (traer el plan).
+b) **Dry-run** de `ppo20k` para revisar el comando:
+   `python scripts/run_training_plan.py --stage ppo20k --dry-run`
+c) Ejecutar **`ppo20k`** con evaluación:
+   `python scripts/run_training_plan.py --stage ppo20k --execute --eval-after`
+d) Si pasa, ejecutar **`ppo50k`** (baseline PPO completo).
+e) Después **DQN** (`dqn20k` → `dqn50k`) y **SAC** (`sac20k` → `sac50k`).
+
+Registrar cada resultado en la tabla de abajo. Recordatorio:
+**`Duckietown-loop_obstacles-v0` es SOLO evaluación, nunca entrenamiento.**
+
 ## Comandos de entrenamiento (vía lanzador)
 Siempre con `--device cpu`, `--init-order model-first`, `MPLBACKEND=Agg`,
 `CUDA_VISIBLE_DEVICES=""`, `xvfb-run -a` (el lanzador los añade):
