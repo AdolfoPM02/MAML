@@ -3,6 +3,13 @@
 Guía paso a paso para entrenar y evaluar los agentes (DQN/PPO/SAC) en **Duckietown
 real** sobre **Google Colab**, respetando el contrato de evaluación del reto.
 
+> **Flujo principal de ENTREGA (autosuficiente):** la entrega es un **ZIP** que contiene
+> todo (código, `requirements.txt`, `best_agent.zip` en la raíz, `Report.pdf`). El
+> profesor solo tiene que **descomprimir el ZIP como `/content/MAML`, abrir
+> `Challenge_RL.ipynb` y ejecutar**. No necesita clonar GitHub ni subir el modelo aparte:
+> el notebook usa los archivos locales y copia `best_agent.zip` a `models/`
+> automáticamente. **Clonar desde GitHub queda como camino de desarrollo / *fallback*.**
+
 > El entrenamiento real **no** puede hacerse en local por el conflicto de dependencias
 > de Duckietown (`numpy<=1.20`). Colab es el entorno objetivo. El profesor pide
 > **Python 3.11**; como el kernel de Colab es 3.12, montamos un **venv 3.11** y

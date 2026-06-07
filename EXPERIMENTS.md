@@ -166,7 +166,8 @@ para entrenamiento.
 
 > **`best_agent.zip` = copia de `ppo_loop_empty_20k_gpu.zip`** (4.6 MB), generada en
 > Colab con `cp models/ppo_loop_empty_20k_gpu.zip models/best_agent.zip` (nombre que pide
-> la presentación; durante el desarrollo se usó `best_duckie_agent.zip`). Se conserva
-> como **artefacto externo de entrega**, NO se versiona en el repo (ver `.gitignore`).
-> Carga final verificada con `eval.py` en `loop_empty`, `episodes=1`, `device=cpu`,
-> `init-order=model-first` → sin error, `length 1500.0`.
+> la presentación; durante el desarrollo se usó `best_duckie_agent.zip`). **Se incluye en
+> la raíz de la entrega final** (ZIP autosuficiente) y **se versiona en el repo** vía la
+> excepción `!best_agent.zip` del `.gitignore`; el notebook lo copia a `models/`
+> automáticamente. Carga final verificada con `eval.py` en `loop_empty`, `episodes=1`,
+> `device=cpu`, `init-order=model-first` → sin error, `length 1500.0`.

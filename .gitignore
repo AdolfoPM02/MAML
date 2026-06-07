@@ -5,9 +5,10 @@ __pycache__/
 outputs/
 models/
 logs/
-# Modelos entrenados: nunca al repo (best_agent.zip es artefacto externo de entrega)
+# Modelos: ignorar todos los .zip EXCEPTO el entregable best_agent.zip (raíz del ZIP).
+# models/best_agent.zip sigue ignorado porque models/ está excluido como directorio.
 *.zip
-best_agent.zip
+!best_agent.zip
 best_duckie_agent.zip
 # Artefactos de compilación LaTeX del report (se versiona report/report.tex y Report.pdf)
 report/*.aux
