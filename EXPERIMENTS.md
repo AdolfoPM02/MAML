@@ -143,5 +143,29 @@ contrato en un Colab limpio.
 - **NUNCA entrenar en `Duckietown-loop_obstacles-v0`** (descalificación). El lanzador y
   `train.py`/`src.envs.make_env` lo bloquean con `ValueError`.
 - `loop_obstacles` solo se **evalúa**, y solo con `--allow-eval-hidden` (→ `--allow-eval`).
-- Mantener `--device cpu` e `--init-order model-first` en Colab mientras el segfault de
-  GPU/env-first no esté resuelto.
+- Mantener `--init-order model-first` en Colab. GPU funcionó con una run controlada
+  (`--use-gpu --device cuda`) tras consolidar model-first.
+
+## Resultados finales (Colab, GPU)
+
+Entrenamiento real en Colab con el stack validado (§3-bis) y `--init-order model-first`.
+Evaluación con `eval.py` (model-first), 3 episodios por mapa salvo indicación.
+
+| stage      | device | timesteps | loop_empty (rew ± std / len) | small_loop (rew ± std / len) | loop_obstacles (rew ± std / len) | conclusión |
+|------------|--------|-----------|------------------------------|------------------------------|----------------------------------|------------|
+| ppo20k_gpu | GPU    | 20 000    | 960.964 ± 605.380 / 1500.0   | 317.528 ± 703.254 / 1500.0   | 1118.216 ± 488.214 / 1500.0      | **GANADOR** |
+| ppo50k_gpu | GPU    | 50 000    | −813.731 ± 210.545 / 1500.0  | −1238.875 ± 393.613 / 1500.0 | −1105.378 ± 760.645 / 1500.0     | descartado (recompensas negativas) |
+
+**Modelo ganador: `ppo_loop_empty_20k_gpu`.** Mejor recompensa en `loop_obstacles`
+(1118.216) y positiva en los tres mapas. **`ppo50k_gpu` NO se selecciona**: aunque
+mantiene `length 1500.0`, obtiene **recompensas negativas en los tres mapas** (más
+timesteps no mejoró; probable degradación de la política).
+
+`loop_obstacles` se usó **solo para evaluación** con `--allow-eval-hidden`; **nunca**
+para entrenamiento.
+
+> **`best_duckie_agent.zip` = copia de `ppo_loop_empty_20k_gpu.zip`** (4.6 MB), generada
+> en Colab con `cp models/ppo_loop_empty_20k_gpu.zip models/best_duckie_agent.zip`. Se
+> conserva como **artefacto externo de entrega**, NO se versiona en el repo (ver
+> `.gitignore`). Carga final verificada con `eval.py` en `loop_empty`, `episodes=1`,
+> `device=cpu`, `init-order=model-first` → sin error, `length 1500.0`.

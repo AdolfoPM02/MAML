@@ -434,23 +434,27 @@ con `--allow-eval-hidden`.
 
 ---
 
-## 10. Preparar la entrega (cuando el entrenamiento completo esté listo)
+## 10. Preparar la entrega
 
-> **Aún no se hace**: requiere el entrenamiento real completo. Documentado para después.
+**Modelo final elegido: `ppo_loop_empty_20k_gpu`** (ver resultados en `EXPERIMENTS.md`).
+En Colab se genera el artefacto del contrato copiándolo al nombre exacto:
 
 ```bash
 %cd /content/MAML
-# Copiar el mejor modelo al nombre EXACTO del contrato
-!cp models/<mejor_modelo>.zip models/best_duckie_agent.zip
-# Congelar dependencias con versiones exactas (==)
-!{PY} -m pip freeze > requirements.txt
+# Copiar el modelo GANADOR al nombre EXACTO del contrato
+!cp models/ppo_loop_empty_20k_gpu.zip models/best_duckie_agent.zip
 ```
-Revisar que `requirements.txt` incluya: `stable-baselines3==2.8.0`, `torch==...`,
-`gymnasium==1.2.3`, `gym==0.26.2`, `numpy==1.26.4`, `gym-duckietown` (línea de git),
-`opencv-python`, `pyglet==1.5.27`, `zuper-commons-z6`, `duckietown-world-daffy`,
-`PyGeometry-z6`, `carnivalmirror==0.6.2`, `pyvirtualdisplay`. Hacer el **dry-run** del
-contrato: Colab nuevo → instalar solo desde `requirements.txt` → cargar
-`best_duckie_agent.zip` → evaluar.
+
+- **`best_duckie_agent.zip`** (~4.6 MB) se conserva como **artefacto externo de entrega**
+  (no se versiona en el repo; está en `.gitignore`). Subirlo solo si el profesor lo exige.
+- **`requirements.txt`**: usar el **stack limpio validado** ya versionado en el repo
+  (raíz), **NO** un `pip freeze` completo de Colab (que arrastra `ipython`, `jedi`,
+  `beautifulsoup4`, etc., ajenos al proyecto). El `requirements.txt` del repo fija el
+  stack 3-bis + `gym-duckietown` por commit.
+
+**Dry-run del contrato** (recomendado): Colab nuevo → `pip install -r requirements.txt`
+→ cargar `best_duckie_agent.zip` → evaluar con `eval.py --init-order model-first`
+(`device cpu`). Validado: carga sin error en `loop_empty`, `length 1500.0`.
 
 ---
 

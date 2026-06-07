@@ -5,6 +5,9 @@ __pycache__/
 outputs/
 models/
 logs/
+# Modelos entrenados: nunca al repo (best_duckie_agent.zip es artefacto externo)
+*.zip
+best_duckie_agent.zip
 *:Zone.Identifier
 
 # Material de referencia local (no se versiona; solo Challenge_RL.ipynb va al repo)
