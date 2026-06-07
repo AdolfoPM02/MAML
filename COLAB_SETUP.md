@@ -448,12 +448,20 @@ En Colab se genera el artefacto del contrato copiándolo al nombre exacto **`bes
 
 - **`best_agent.zip`** (~4.6 MB) se conserva como **artefacto externo de entrega**
   (no se versiona en el repo; está en `.gitignore`). Subirlo solo si el profesor lo exige.
-- **`requirements.txt`**: usar el **stack limpio validado** ya versionado en el repo
-  (raíz), **NO** un `pip freeze` completo de Colab (que arrastra `ipython`, `jedi`,
-  `beautifulsoup4`, etc., ajenos al proyecto). El `requirements.txt` del repo fija el
-  stack 3-bis + `gym-duckietown` por commit.
+- **`requirements.txt`**: contiene **solo el stack comprobado por el compañero** (25
+  paquetes con pins exactos), **NO** un `pip freeze` completo de Colab (que arrastra
+  `ipython`, `jedi`, `beautifulsoup4`, etc.) **ni** `gym-duckietown`.
+- **`gym-duckietown` se instala APARTE** con `--no-deps` (sus dependencias ya están en
+  `requirements.txt`), y **numpy se re-fija al final** (`--force-reinstall --no-deps
+  numpy==1.23.5`) por si alguna dependencia lo cambia. El orden exacto está en las celdas
+  de la sección *Dependencias* de `Challenge_RL.ipynb`:
+  ```bash
+  !{PY} -m pip install -r requirements.txt
+  !{PY} -m pip install --no-deps "duckietown-gym-daffy @ git+https://github.com/duckietown/gym-duckietown.git@c76a7fec7f739db4f624f40ca83ce99383665558"
+  !{PY} -m pip install --force-reinstall --no-deps numpy==1.23.5
+  ```
 
-**Dry-run del contrato** (recomendado): Colab nuevo → `pip install -r requirements.txt`
+**Dry-run del contrato** (recomendado): Colab nuevo → sección *Dependencias* del notebook
 → cargar `best_agent.zip` → evaluar con `eval.py --init-order model-first`
 (`device cpu`). Validado: carga sin error en `loop_empty`, `length 1500.0`.
 

@@ -23,4 +23,3 @@ aido-protocols-daffy==6.1.1
 duckietown-serialization-ds1==1.1.1
 duckietown-world-daffy==6.4.3
 pycontracts3==7.2
-duckietown-gym-daffy @ git+https://github.com/duckietown/gym-duckietown.git@c76a7fec7f739db4f624f40ca83ce99383665558
