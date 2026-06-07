@@ -1,0 +1,200 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{fontspec}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,topsep=3pt}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\sloppy
+
+\title{\textbf{Conducción Autónoma en Duckietown mediante Aprendizaje por Refuerzo profundo}\\[4pt]
+\large Memoria técnica --- Proyecto Final MSc IA}
+\author{Adolfo (AdolfoPM02)}
+\date{Junio 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Se entrena un agente de \emph{Deep Reinforcement Learning} para conducir en el simulador
+3D \textbf{Duckietown} usando únicamente píxeles de la cámara frontal. El trabajo cubre
+tres fases: (1) Q-Learning tabular \emph{desde cero} en \code{FrozenLake-v1}; (2) dos
+baselines con Stable-Baselines3 ---\textbf{DQN} (acción discreta) y \textbf{PPO} (acción
+continua)---; y (3) un algoritmo avanzado, \textbf{SAC}. El modelo final seleccionado es
+un \textbf{PPO entrenado 20\,000 pasos}, que obtiene la mejor recompensa en el mapa oculto
+de evaluación (\code{loop\_obstacles}) y supera ampliamente a una variante PPO de 50\,000
+pasos que degeneró. Se documenta además la resolución de un \emph{segmentation fault}
+nativo (Duckietown\,+\,OpenGL\,+\,SB3) mediante un orden de inicialización
+\emph{model-first}, clave para que el pipeline funcione en Google Colab.
+\end{abstract}
+
+\section{Introducción y objetivo}
+El objetivo es entrenar un agente capaz de mantenerse en el carril en Duckietown a partir
+de observaciones de imagen, y que \textbf{generalice} a un mapa no visto durante el
+entrenamiento. La nota depende del desempeño en el mapa oculto
+\code{Duckietown-loop\_obstacles-v0}, con obstáculos estáticos.
+
+\paragraph{Contrato de evaluación.} El modelo debe (i) esperar observaciones de forma
+\code{(1, 64, 64)} apiladas en 4 frames $\rightarrow$ \code{(4, 64, 64)}; (ii) llevar
+definidas e importables las clases personalizadas (\code{CustomCNN}, wrappers); y (iii)
+cargar ``a la primera'' en un entorno limpio reconstruido desde \code{requirements.txt}.
+Entrenar en el mapa oculto supone descalificación.
+
+\section{Fase 1: Q-Learning tabular (\texttt{FrozenLake-v1})}
+Como calentamiento se implementa Q-Learning tabular sin librerías de Deep RL sobre
+\code{FrozenLake-v1} 8$\times$8 \emph{resbaladiza}. La tabla $Q\in\mathbb{R}^{64\times4}$
+se actualiza con la ecuación de Bellman (TD(0)):
+\begin{equation}
+Q(s,a) \leftarrow Q(s,a) + \alpha\,\bigl[\,r + \gamma \max_{a'} Q(s',a') - Q(s,a)\,\bigr],
+\end{equation}
+con política $\varepsilon$-greedy y decaimiento lineal de $\varepsilon$
+($1.0\rightarrow0.05$), $\alpha=0.1$, $\gamma=0.99$ y 50\,000 episodios. La política
+greedy aprendida alcanza una \textbf{tasa de éxito $\approx 0.52$} (frente a $\approx 0$
+del azar en este entorno resbaladizo). La Figura~\ref{fig:frozenlake} muestra la curva de
+media móvil de recompensa. Implementación en \code{q\_learning\_sandbox.py}.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.78\textwidth]{q_learning_frozenlake.png}
+\caption{Fase 1: media móvil (ventana 100) de la recompensa por episodio en
+\code{FrozenLake-v1} 8$\times$8 resbaladiza. El aprendizaje despega hacia el episodio
+$\sim$20k y se estabiliza en torno a 0.45--0.50.}
+\label{fig:frozenlake}
+\end{figure}
+
+\section{Pipeline de visión y arquitectura}
+El entorno real de Duckietown (API de \code{gym} antiguo) se adapta a Gymnasium mediante
+\code{DuckieWrapper} (\code{src/wrappers.py}). El procesamiento de cada observación es:
+\[
+\text{RGB }(480{\times}640{\times}3) \rightarrow \text{recorte 50\% superior (cielo)}
+\rightarrow \text{grises} \rightarrow \text{resize }64{\times}64 \rightarrow (1,64,64)
+\]
+y, tras \code{VecFrameStack(n\_stack=4)} (\code{src/envs.py}), $(4,64,64)$. Las acciones
+continuas se normalizan a un vector plano $[\,v, \delta\,]$ con $v\in[0,1]$,
+$\delta\in[-1,1]$ (necesario: SB3 puede entregar la acción con dimensión extra, lo que
+rompía la dinámica de Duckietown).
+
+\paragraph{\texttt{CustomCNN}.} Extractor de características estilo \emph{NatureCNN}
+(\code{src/cnn.py}): tres capas convolucionales
+$\text{Conv}(32,8,4)\!\rightarrow\!\text{Conv}(64,4,2)\!\rightarrow\!\text{Conv}(64,3,1)$
+con ReLU, \emph{flatten} y capa lineal a 256 características; normaliza la entrada
+\code{uint8} dividiendo por 255. Se conecta a SB3 vía \code{policy\_kwargs} y es común a
+los tres algoritmos.
+
+\section{Algoritmos}
+\paragraph{DQN (baseline discreto).} Q-Learning profundo \emph{off-policy}. Como
+Duckietown es continuo, \code{DiscreteActionWrapper} expone 5 acciones discretas (recto,
+giros suaves y fuertes) mapeadas a comandos $[v,\delta]$. Config.: \code{lr}$=10^{-4}$,
+\code{buffer}$=50$k, \code{learning\_starts}$=10$k, \code{batch}$=32$,
+\code{train\_freq}$=4$, \code{target\_update}$=1000$, exploración
+$\varepsilon$ $1.0\!\rightarrow\!0.05$.
+
+\paragraph{PPO (baseline continuo).} Gradiente de política \emph{on-policy} con
+\emph{clipping}, estable y eficiente en muestras. Config.: \code{lr}$=3\cdot10^{-4}$,
+\code{n\_steps}$=2048$, \code{batch}$=64$, \code{n\_epochs}$=10$, $\gamma=0.99$,
+$\lambda_{\text{GAE}}=0.95$, \code{clip}$=0.2$.
+
+\paragraph{SAC (algoritmo avanzado, Fase 3).} Actor-Crítico \emph{off-policy} de máxima
+entropía, con exploración regulada automáticamente. Config.: \code{lr}$=3\cdot10^{-4}$,
+\code{buffer}$=50$k, \code{batch}$=256$, $\tau=0.005$, \code{ent\_coef}=auto. Comparte
+\code{CustomCNN} y wrappers con PPO.
+
+\section{Metodología de entrenamiento}
+El entrenamiento real se realizó en \textbf{Google Colab}. El stack de Duckietown exige
+\textbf{Python 3.11} (incompatible con el kernel 3.12 de Colab), por lo que se monta un
+\code{venv} 3.11 y se ejecuta todo como subproceso. Se resolvieron, de forma iterativa,
+varios fallos nativos:
+\begin{itemize}
+  \item \textbf{Dependencias:} \code{gym-duckietown} se instala con \code{--no-deps} y se
+  re-fija \code{numpy==1.23.5} al final, para no romper el resto del stack.
+  \item \textbf{Render headless:} \code{xvfb-run} + \code{MPLBACKEND=Agg}.
+  \item \textbf{\emph{Segmentation fault} (Duckietown+OpenGL+SB3):} ocurría al
+  \emph{inicializar} el modelo con el entorno real. Un diagnóstico por aislamiento
+  (entorno sintético con espacios idénticos) demostró que SB3/torch/CNN eran correctos y
+  el crash dependía del entorno real. La solución es el orden \textbf{\emph{model-first}}:
+  construir el modelo sobre un entorno sintético y luego \code{model.set\_env(real)}.
+  \code{train.py} y \code{eval.py} lo soportan con \code{--init-order model-first}.
+\end{itemize}
+Regla de seguridad: el mapa oculto \code{loop\_obstacles} está bloqueado para
+entrenamiento (\code{ValueError}) y solo se usa para evaluación.
+
+\section{Resultados}
+Evaluación con \code{eval.py} (3 episodios por mapa, política determinista). La
+Tabla~\ref{tab:res} compara el ganador (PPO 20k) con la variante de 50k.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llrr}
+\toprule
+\textbf{Modelo} & \textbf{Mapa} & \textbf{Recompensa (media\,$\pm$\,std)} & \textbf{Longitud} \\
+\midrule
+\textbf{PPO 20k (ganador)} & loop\_empty     & $960.964 \pm 605.380$  & $1500.0$ \\
+\textbf{PPO 20k (ganador)} & small\_loop     & $317.528 \pm 703.254$  & $1500.0$ \\
+\textbf{PPO 20k (ganador)} & loop\_obstacles & $\mathbf{1118.216 \pm 488.214}$ & $1500.0$ \\
+\midrule
+PPO 50k (descartado) & loop\_empty     & $-813.731 \pm 210.545$  & $1500.0$ \\
+PPO 50k (descartado) & small\_loop     & $-1238.875 \pm 393.613$ & $1500.0$ \\
+PPO 50k (descartado) & loop\_obstacles & $-1105.378 \pm 760.645$ & $1500.0$ \\
+\bottomrule
+\end{tabular}
+\caption{Resultados de evaluación. \code{loop\_obstacles} es el mapa oculto, usado
+\emph{solo} para evaluación. Longitud 1500 = el episodio alcanza el límite de pasos.}
+\label{tab:res}
+\end{table}
+
+\paragraph{Dry-run del contrato.} En un Colab limpio se reconstruyó el entorno desde
+\code{requirements.txt}, se instaló \code{gym-duckietown} aparte, se re-fijó
+\code{numpy==1.23.5} y se cargó \code{best\_agent.zip}. Versiones verificadas:
+\begin{verbatim}
+numpy 1.23.5 | torch 2.12.0+cu130 | gym 0.25.2
+gymnasium 0.29.1 | stable_baselines3 2.2.1 | gym_duckietown OK
+\end{verbatim}
+La carga y evaluación en \code{loop\_empty} terminó sin error
+(\textbf{reward $535.150$, longitud $1500.0$}), confirmando el ``carga a la primera''.
+
+\section{Discusión}
+\textbf{Por qué gana PPO 20k.} Es el único modelo con recompensa \emph{positiva} en los
+tres mapas y, sobre todo, el mejor en el mapa oculto (\,$1118.216$\,), lo que indica buena
+\textbf{generalización} y no mero sobreajuste a \code{loop\_empty}. Su robustez relativa
+encaja con la naturaleza \emph{on-policy} y estable de PPO sobre observaciones de imagen.
+
+\textbf{Por qué se descarta PPO 50k.} Más pasos \emph{no} mejoraron: las recompensas son
+negativas en los tres mapas pese a mantener longitud 1500. Es un caso de degradación de la
+política (probable colapso/entropía baja o sobre-optimización del \emph{proxy} de
+recompensa), un recordatorio de que en RL más entrenamiento no implica mejor política.
+
+\textbf{Baselines y Fase 3.} DQN aporta el baseline discreto y SAC la alternativa avanzada
+continua; ambos comparten arquitectura y wrappers, lo que hace la comparación justa. Dado
+el resultado empírico, el entregable final es PPO 20k.
+
+\section{Conclusión}
+Se logró un pipeline completo y reproducible (Fase 1 tabular, Fases 2--3 sobre Duckietown)
+y un agente que generaliza al mapa oculto. La contribución práctica principal fue
+diagnosticar y resolver el \emph{segmentation fault} nativo mediante \emph{model-first},
+sin lo cual el entrenamiento/carga no era viable en Colab. El modelo final
+(\code{best\_agent.zip}, copia de \code{ppo\_loop\_empty\_20k\_gpu.zip}) supera a las
+variantes consideradas en el criterio del contrato.
+
+\section*{Reproducibilidad}
+Dependencias: \code{requirements.txt} (stack exacto) + \code{gym-duckietown} aparte
+(\code{--no-deps}) + re-fijado de \code{numpy==1.23.5} (detalle en \code{COLAB\_SETUP.md}).
+Protocolo y tabla de experimentos en \code{EXPERIMENTS.md}. Comandos principales:
+\begin{verbatim}
+# Entrenamiento (CPU o GPU)
+python scripts/run_training_plan.py --stage ppo20k --execute \
+    --eval-after --init-order model-first
+
+# Evaluación del modelo final
+python eval.py --algo ppo --model models/best_agent \
+    --map Duckietown-loop_empty-v0 --init-order model-first --device cpu
+\end{verbatim}
+
+\end{document}

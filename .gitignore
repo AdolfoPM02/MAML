@@ -9,6 +9,11 @@ logs/
 *.zip
 best_agent.zip
 best_duckie_agent.zip
+# Artefactos de compilación LaTeX del report (se versiona report/report.tex y Report.pdf)
+report/*.aux
+report/*.log
+report/*.out
+report/report.pdf
 *:Zone.Identifier
 
 # Material de referencia local (no se versiona; solo Challenge_RL.ipynb va al repo)
