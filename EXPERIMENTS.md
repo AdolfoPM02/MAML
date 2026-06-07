@@ -1,7 +1,7 @@
 # EXPERIMENTS.md — Protocolo de entrenamiento real controlado (Duckietown RL)
 
 Protocolo para entrenar y evaluar los agentes en **Duckietown real sobre Google Colab**,
-registrar resultados y elegir el `best_duckie_agent.zip` final. El lanzador
+registrar resultados y elegir el `best_agent.zip` final. El lanzador
 `scripts/run_training_plan.py` compone los comandos correctos (no entrena solo).
 
 > Entorno y fixes ya resueltos: stack del compañero (ver `COLAB_SETUP.md` §3-bis),
@@ -124,7 +124,7 @@ Rellenar tras cada experimento (recompensa media ± std y longitud media de epis
 | sac20k | sac_loop_empty_20k   |                              |                              |                            |       |
 | sac50k | sac_advanced_50k     |                              |                              |                            |       |
 
-## Criterio para elegir `best_duckie_agent.zip`
+## Criterio para elegir `best_agent.zip`
 La nota depende de la **generalización al mapa oculto** `loop_obstacles`. Elegir el
 modelo que maximice, **en orden de prioridad**:
 1. Mayor **recompensa acumulada media en `loop_obstacles`** (con `--allow-eval-hidden`).
@@ -134,7 +134,7 @@ modelo que maximice, **en orden de prioridad**:
 
 Cuando el ganador esté claro, copiarlo al nombre EXACTO del contrato (en Colab):
 ```bash
-!cp models/<ganador>.zip models/best_duckie_agent.zip
+!cp models/<ganador>.zip models/best_agent.zip
 ```
 y cerrar el `requirements.txt` definitivo (ver `COLAB_SETUP.md` §10) + dry-run del
 contrato en un Colab limpio.
@@ -164,8 +164,9 @@ timesteps no mejoró; probable degradación de la política).
 `loop_obstacles` se usó **solo para evaluación** con `--allow-eval-hidden`; **nunca**
 para entrenamiento.
 
-> **`best_duckie_agent.zip` = copia de `ppo_loop_empty_20k_gpu.zip`** (4.6 MB), generada
-> en Colab con `cp models/ppo_loop_empty_20k_gpu.zip models/best_duckie_agent.zip`. Se
-> conserva como **artefacto externo de entrega**, NO se versiona en el repo (ver
-> `.gitignore`). Carga final verificada con `eval.py` en `loop_empty`, `episodes=1`,
-> `device=cpu`, `init-order=model-first` → sin error, `length 1500.0`.
+> **`best_agent.zip` = copia de `ppo_loop_empty_20k_gpu.zip`** (4.6 MB), generada en
+> Colab con `cp models/ppo_loop_empty_20k_gpu.zip models/best_agent.zip` (nombre que pide
+> la presentación; durante el desarrollo se usó `best_duckie_agent.zip`). Se conserva
+> como **artefacto externo de entrega**, NO se versiona en el repo (ver `.gitignore`).
+> Carga final verificada con `eval.py` en `loop_empty`, `episodes=1`, `device=cpu`,
+> `init-order=model-first` → sin error, `length 1500.0`.

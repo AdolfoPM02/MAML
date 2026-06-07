@@ -5,8 +5,9 @@ __pycache__/
 outputs/
 models/
 logs/
-# Modelos entrenados: nunca al repo (best_duckie_agent.zip es artefacto externo)
+# Modelos entrenados: nunca al repo (best_agent.zip es artefacto externo de entrega)
 *.zip
+best_agent.zip
 best_duckie_agent.zip
 *:Zone.Identifier
 

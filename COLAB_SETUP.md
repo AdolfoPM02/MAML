@@ -437,15 +437,16 @@ con `--allow-eval-hidden`.
 ## 10. Preparar la entrega
 
 **Modelo final elegido: `ppo_loop_empty_20k_gpu`** (ver resultados en `EXPERIMENTS.md`).
-En Colab se genera el artefacto del contrato copiándolo al nombre exacto:
+En Colab se genera el artefacto del contrato copiándolo al nombre exacto **`best_agent.zip`**
+(nombre que pide la presentación; durante el desarrollo se usó `best_duckie_agent.zip`):
 
 ```bash
 %cd /content/MAML
 # Copiar el modelo GANADOR al nombre EXACTO del contrato
-!cp models/ppo_loop_empty_20k_gpu.zip models/best_duckie_agent.zip
+!cp models/ppo_loop_empty_20k_gpu.zip models/best_agent.zip
 ```
 
-- **`best_duckie_agent.zip`** (~4.6 MB) se conserva como **artefacto externo de entrega**
+- **`best_agent.zip`** (~4.6 MB) se conserva como **artefacto externo de entrega**
   (no se versiona en el repo; está en `.gitignore`). Subirlo solo si el profesor lo exige.
 - **`requirements.txt`**: usar el **stack limpio validado** ya versionado en el repo
   (raíz), **NO** un `pip freeze` completo de Colab (que arrastra `ipython`, `jedi`,
@@ -453,7 +454,7 @@ En Colab se genera el artefacto del contrato copiándolo al nombre exacto:
   stack 3-bis + `gym-duckietown` por commit.
 
 **Dry-run del contrato** (recomendado): Colab nuevo → `pip install -r requirements.txt`
-→ cargar `best_duckie_agent.zip` → evaluar con `eval.py --init-order model-first`
+→ cargar `best_agent.zip` → evaluar con `eval.py --init-order model-first`
 (`device cpu`). Validado: carga sin error en `loop_empty`, `length 1500.0`.
 
 ---
@@ -520,6 +521,6 @@ de dependencias, de display o del entorno.
 ---
 
 ## Qué NO cubre esta fase
-- No se entrena el modelo completo ni se crea `best_duckie_agent.zip` definitivo.
+- No se entrena el modelo completo ni se crea `best_agent.zip` definitivo.
 - No se congela el `requirements.txt` final (se hará tras el entrenamiento real).
 - No se modifica `Challenge_RL.ipynb` ni los notebooks de referencia.
