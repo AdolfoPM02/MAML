@@ -42,6 +42,41 @@ e) Después **DQN** (`dqn20k` → `dqn50k`) y **SAC** (`sac20k` → `sac50k`).
 Registrar cada resultado en la tabla de abajo. Recordatorio:
 **`Duckietown-loop_obstacles-v0` es SOLO evaluación, nunca entrenamiento.**
 
+## Plan de entrenamiento real recomendado
+
+> Nota de rendimiento: PPO 20k en **CPU** tardó ~**1h30**. Por eso conviene probar GPU
+> con una run **corta** primero. El segfault de GPU era anterior a consolidar
+> `model-first`; ahora merece la pena reintentarlo con una run de 5k, no con un
+> entrenamiento largo. El lanzador **no reentrena** si el `.zip` ya existe (usa
+> `--overwrite` para forzar).
+
+**A. Pruebas cortas de estabilidad**
+1. `ppo5k` en **CPU**: `python scripts/run_training_plan.py --stage ppo5k --execute --eval-after`
+2. `ppo5k` en **GPU**: `... --stage ppo5k --execute --eval-after --use-gpu --device cuda`
+3. Si GPU da `Segmentation fault`, **continuar en CPU** (no insistir con GPU).
+4. Si GPU funciona, usar GPU para `ppo20k`/`ppo50k`.
+
+**B. Entrenamientos principales** (en este orden)
+1. `ppo20k` → 2. `ppo50k` → 3. `dqn20k` → 4. `sac20k` → 5. `dqn50k` y `sac50k` solo si hay tiempo.
+
+**C. Evaluación**
+- Siempre en `Duckietown-loop_empty-v0` y `Duckietown-small_loop-v0` (`--eval-after`).
+- En `Duckietown-loop_obstacles-v0` solo con `--allow-eval-hidden`, y solo para comparar
+  modelos **candidatos**. **Nunca entrenar** en `loop_obstacles`.
+
+**D. Tabla de resultados (rellenar)**
+
+| stage | device | timesteps | tiempo aprox | loop_empty rew | loop_empty len | small_loop rew | small_loop len | loop_obstacles rew | loop_obstacles len | observaciones |
+|-------|--------|-----------|--------------|----------------|----------------|----------------|----------------|--------------------|--------------------|---------------|
+| ppo5k  | CPU |  5 000 |        |  |  |  |  |  |  |  |
+| ppo5k  | GPU |  5 000 |        |  |  |  |  |  |  |  |
+| ppo20k |     | 20 000 |        |  |  |  |  |  |  |  |
+| ppo50k |     | 50 000 |        |  |  |  |  |  |  |  |
+| dqn20k |     | 20 000 |        |  |  |  |  |  |  |  |
+| sac20k |     | 20 000 |        |  |  |  |  |  |  |  |
+| dqn50k |     | 50 000 |        |  |  |  |  |  |  |  |
+| sac50k |     | 50 000 |        |  |  |  |  |  |  |  |
+
 ## Comandos de entrenamiento (vía lanzador)
 Siempre con `--device cpu`, `--init-order model-first`, `MPLBACKEND=Agg`,
 `CUDA_VISIBLE_DEVICES=""`, `xvfb-run -a` (el lanzador los añade):

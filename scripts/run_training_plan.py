@@ -28,8 +28,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import config
 
+MODELS_DIR = "models"
+
 # stage -> algoritmo, timesteps y nombre de salida estándar.
 STAGES = {
+    # Pruebas cortas de estabilidad (rápidas).
+    "ppo5k": dict(algo="ppo", timesteps=5_000, output="ppo_loop_empty_5k"),
+    "dqn5k": dict(algo="dqn", timesteps=5_000, output="dqn_loop_empty_5k"),
+    "sac5k": dict(algo="sac", timesteps=5_000, output="sac_loop_empty_5k"),
+    # Entrenamientos principales.
     "ppo20k": dict(algo="ppo", timesteps=20_000, output="ppo_loop_empty_20k"),
     "ppo50k": dict(algo="ppo", timesteps=50_000, output="ppo_baseline_50k"),
     "dqn20k": dict(algo="dqn", timesteps=20_000, output="dqn_loop_empty_20k"),
@@ -53,6 +60,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Tras entrenar, evalúa en los mapas definidos.")
     p.add_argument("--episodes", type=int, default=3)
     p.add_argument("--device", default="cpu", choices=["auto", "cpu", "cuda"])
+    p.add_argument("--use-gpu", action="store_true",
+                   help="No fija CUDA_VISIBLE_DEVICES=\"\" (permite GPU). Por defecto se "
+                        "fuerza CPU. Combinar con --device cuda (o auto).")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Reentrenar aunque models/{output}.zip ya exista.")
     p.add_argument("--init-order", default="model-first",
                    choices=["env-first", "model-first"])
     p.add_argument("--python", default="/content/venv-maml/bin/python",
@@ -69,7 +81,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def _prefix(args: argparse.Namespace) -> str:
-    pre = 'env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" '
+    pre = "env MPLBACKEND=Agg "
+    if not args.use_gpu:
+        # Comportamiento por defecto: forzar CPU ocultando la GPU.
+        pre += 'CUDA_VISIBLE_DEVICES="" '
     if args.xvfb:
         pre += "xvfb-run -a "
     return pre
@@ -110,23 +125,37 @@ def main(argv=None) -> None:
             f"evalúa con --allow-eval-hidden."
         )
 
-    commands = [("TRAIN", train_command(args, stage, output))]
+    # No reentrenar por accidente: si el .zip ya existe y no hay --overwrite, saltar
+    # el entrenamiento (pero permitir evaluar si --eval-after).
+    out_zip = os.path.join(MODELS_DIR, output + ".zip")
+    skip_train = os.path.exists(out_zip) and not args.overwrite
+
+    commands = []
+    if not skip_train:
+        commands.append(("TRAIN", train_command(args, stage, output)))
     if args.eval_after:
         for c in eval_commands(args, stage, output):
             commands.append(("EVAL", c))
 
     execute = args.execute and not args.dry_run
+    gpu = "GPU" if args.use_gpu else "CPU"
 
     print("=" * 70)
     print(f"PLAN | stage={args.stage} | algo={stage['algo']} | "
           f"timesteps={stage['timesteps']} | output={output}")
-    print(f"     | map(train)={args.map} | eval_after={args.eval_after} | "
-          f"allow_eval_hidden={args.allow_eval_hidden} | execute={execute}")
+    print(f"     | map(train)={args.map} | device={args.device} ({gpu}) | "
+          f"eval_after={args.eval_after} | allow_eval_hidden={args.allow_eval_hidden} | "
+          f"execute={execute}")
     print("=" * 70)
+    if skip_train:
+        print(f"[SKIP] Ya existe {out_zip}. Usa --overwrite para reentrenar.")
     for kind, cmd in commands:
         print(f"[{kind}] {cmd}")
     print("=" * 70)
 
+    if not commands:
+        print("(nada que hacer: modelo ya existe y no se pidió --eval-after.)")
+        return
     if not execute:
         print("(dry-run: no se ejecuta nada. Usa --execute para lanzar.)")
         return
