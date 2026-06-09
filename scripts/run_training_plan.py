@@ -39,6 +39,23 @@ STAGES = {
     # Entrenamientos principales.
     "ppo20k": dict(algo="ppo", timesteps=20_000, output="ppo_loop_empty_20k"),
     "ppo50k": dict(algo="ppo", timesteps=50_000, output="ppo_baseline_50k"),
+    # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
+    # NO multimapa: se descartó map=all porque rompe --init-order model-first
+    # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
+    # y admite override con --map (un mapa permitido); loop_obstacles sigue bloqueado.
+    "ppo_adv5k":  dict(algo="ppo_adv", timesteps=5_000,  output="ppo_advanced_5k"),
+    "ppo_adv20k": dict(algo="ppo_adv", timesteps=20_000, output="ppo_advanced_20k"),
+    "ppo_adv50k": dict(algo="ppo_adv", timesteps=50_000, output="ppo_advanced_50k"),
+    # Fase 3 v2 (CONSERVADORA): PPO ~baseline + entropía suave (ent_coef=0.001). Single-map.
+    "ppo_adv_v2_5k":  dict(algo="ppo_adv_v2", timesteps=5_000,  output="ppo_advanced_v2_5k"),
+    "ppo_adv_v2_20k": dict(algo="ppo_adv_v2", timesteps=20_000, output="ppo_advanced_v2_20k"),
+    "ppo_adv_v2_50k": dict(algo="ppo_adv_v2", timesteps=50_000, output="ppo_advanced_v2_50k"),
+    # Fase 3 (FINE-TUNING): continuar entrenando desde el modelo GANADOR (best_agent.zip).
+    # Single-map (loop_empty); init-order model-first sigue funcionando (1 env == 1 env).
+    "ppo_ft5k":  dict(algo="ppo", timesteps=5_000,  output="ppo_finetuned_5k",
+                      init_model="models/best_agent", learning_rate_override=5e-5),
+    "ppo_ft10k": dict(algo="ppo", timesteps=10_000, output="ppo_finetuned_10k",
+                      init_model="models/best_agent", learning_rate_override=5e-5),
     "dqn20k": dict(algo="dqn", timesteps=20_000, output="dqn_loop_empty_20k"),
     "dqn50k": dict(algo="dqn", timesteps=50_000, output="dqn_baseline_50k"),
     "sac20k": dict(algo="sac", timesteps=20_000, output="sac_loop_empty_20k"),
@@ -59,6 +76,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--eval-after", action="store_true",
                    help="Tras entrenar, evalúa en los mapas definidos.")
     p.add_argument("--episodes", type=int, default=3)
+    p.add_argument("--seed", type=int, default=42,
+                   help="Semilla (se pasa a train.py y eval.py). Default 42.")
     p.add_argument("--device", default="cpu", choices=["auto", "cpu", "cuda"])
     p.add_argument("--use-gpu", action="store_true",
                    help="No fija CUDA_VISIBLE_DEVICES=\"\" (permite GPU). Por defecto se "
@@ -90,11 +109,22 @@ def _prefix(args: argparse.Namespace) -> str:
     return pre
 
 
+def stage_train_map(args: argparse.Namespace, stage: dict) -> str:
+    """Mapa de ENTRENAMIENTO efectivo. El mapa propio del stage PREVALECE sobre --map
+    (p. ej. ppo_adv* fuerza map=all); si el stage no define mapa, se usa --map."""
+    return stage.get("map", args.map)
+
+
 def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
-    return (f'{_prefix(args)}{args.python} train.py '
-            f'--algo {stage["algo"]} --map {args.map} '
-            f'--timesteps {stage["timesteps"]} --output {output} '
-            f'--device {args.device} --init-order {args.init_order}')
+    cmd = (f'{_prefix(args)}{args.python} train.py '
+           f'--algo {stage["algo"]} --map {stage_train_map(args, stage)} '
+           f'--timesteps {stage["timesteps"]} --output {output} '
+           f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
+    if stage.get("init_model"):  # fine-tuning: continuar desde un modelo guardado
+        cmd += f' --init-model {stage["init_model"]}'
+        if stage.get("learning_rate_override") is not None:
+            cmd += f' --learning-rate-override {stage["learning_rate_override"]}'
+    return cmd
 
 
 def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[str]:
@@ -103,12 +133,12 @@ def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[st
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} --map {m} '
                     f'--episodes {args.episodes} --device {args.device} '
-                    f'--init-order {args.init_order}')
+                    f'--init-order {args.init_order} --seed {args.seed}')
     if args.allow_eval_hidden:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} '
                     f'--map {config.EVAL_MAP} --episodes {args.episodes} --allow-eval '
-                    f'--device {args.device} --init-order {args.init_order}')
+                    f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
     return cmds
 
 
@@ -116,12 +146,13 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     stage = STAGES[args.stage]
     output = args.output or stage["output"]
+    train_map = stage_train_map(args, stage)  # mapa efectivo (stage prevalece sobre --map)
 
-    # SEGURIDAD: jamás entrenar en el mapa de evaluación oculto.
-    if args.map == config.EVAL_MAP:
+    # SEGURIDAD: jamás entrenar en el mapa de evaluación oculto (se comprueba el EFECTIVO).
+    if train_map == config.EVAL_MAP:
         raise ValueError(
-            f"'{args.map}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él "
-            f"(descalificación). Usa un mapa de TRAIN_MAPS; loop_obstacles solo se "
+            f"'{train_map}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él "
+            f"(descalificación). Usa un mapa de TRAIN_MAPS o 'all'; loop_obstacles solo se "
             f"evalúa con --allow-eval-hidden."
         )
 
@@ -143,7 +174,7 @@ def main(argv=None) -> None:
     print("=" * 70)
     print(f"PLAN | stage={args.stage} | algo={stage['algo']} | "
           f"timesteps={stage['timesteps']} | output={output}")
-    print(f"     | map(train)={args.map} | device={args.device} ({gpu}) | "
+    print(f"     | map(train)={train_map} | device={args.device} ({gpu}) | "
           f"eval_after={args.eval_after} | allow_eval_hidden={args.allow_eval_hidden} | "
           f"execute={execute}")
     print("=" * 70)

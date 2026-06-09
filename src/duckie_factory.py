@@ -84,4 +84,12 @@ def make_base_env(env_name: str, use_mock: bool | None = None,
         return MockDuckietownEnv(env_name=env_name, seed=seed)
 
     import gym as old_gym  # gym antiguo, requerido por gym_duckietown
-    return old_gym.make(env_name)
+    env = old_gym.make(env_name)
+    # Best-effort: sembrar el entorno real. gym antiguo usa env.seed(); no rompemos si
+    # no existe o falla (no se promete reproducibilidad bit a bit del simulador).
+    try:
+        if hasattr(env, "seed"):
+            env.seed(seed)
+    except Exception:
+        pass
+    return env

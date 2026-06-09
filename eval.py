@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
+import torch
 from stable_baselines3 import DQN, PPO, SAC
 import gymnasium as gym
 from gymnasium import spaces
@@ -33,7 +35,18 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from src import config
 from src.envs import build_vec_env
 
-ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "sac": SAC}
+
+def set_global_seeds(seed: int) -> None:
+    """Fija la semilla en random, numpy y torch (reproducibilidad razonable; NO promete
+    resultados bit a bit, sobre todo en GPU o con el simulador Duckietown)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+# ppo_adv / ppo_adv_v2 (Fase 3) cargan con la clase PPO (son PPO con hiperparámetros avanzados).
+ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "ppo_adv_v2": PPO, "sac": SAC}
 
 
 class _PlaceholderEnv(gym.Env):
@@ -72,8 +85,10 @@ class _PlaceholderEnv(gym.Env):
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluar un modelo Duckietown guardado.")
-    p.add_argument("--algo", required=True, choices=["dqn", "ppo", "sac"],
-                   help="Algoritmo del modelo (elige la clase para .load).")
+    p.add_argument("--algo", required=True,
+                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"],
+                   help="Algoritmo del modelo (elige la clase para .load). "
+                        "ppo_adv y ppo_adv_v2 usan PPO.")
     p.add_argument("--model", required=True,
                    help="Ruta al .zip del modelo (con o sin extensión).")
     p.add_argument("--map", default="Duckietown-loop_empty-v0",
@@ -86,7 +101,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN, "
                         "NUNCA para entrenamiento. Sin este flag, ese mapa está "
                         "bloqueado por el guard de make_env.")
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=42,
+                   help="Semilla para random/numpy/torch y el entorno de evaluación.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     p.add_argument("--init-order", default="env-first",
                    choices=["env-first", "model-first"],
@@ -150,11 +166,12 @@ def evaluate(args: argparse.Namespace) -> dict:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    set_global_seeds(args.seed)
     print("=" * 64)
     print(f"EVAL | algo={args.algo} | model={args.model} | map={args.map}")
     print(f"     | episodes={args.episodes} | mock={args.use_mock} | "
           f"allow_eval={args.allow_eval} | deterministic={args.deterministic} | "
-          f"init-order={args.init_order}")
+          f"init-order={args.init_order} | seed={args.seed}")
     print("=" * 64)
 
     m = evaluate(args)

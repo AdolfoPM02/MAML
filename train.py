@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 
 # Permitir importar el paquete src/ ejecutando desde la raíz del proyecto.
@@ -31,9 +32,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from stable_baselines3 import DQN, PPO, SAC
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.utils import get_schedule_fn
 
 import gymnasium as gym
 import numpy as np
+import torch
 from gymnasium import spaces
 from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -43,6 +46,16 @@ from src.envs import build_vec_env
 
 MODELS_DIR = "models"
 DEFAULT_LOG_DIR = "logs"
+
+
+def set_global_seeds(seed: int) -> None:
+    """Fija la semilla en random, numpy y torch (reproducibilidad razonable; NO promete
+    resultados bit a bit, sobre todo en GPU o con el simulador Duckietown)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 class _PlaceholderEnv(gym.Env):
@@ -119,6 +132,49 @@ def get_algo_spec(algo: str, smoke: bool) -> dict:
             hp.update(n_steps=128, batch_size=64, n_epochs=2)
         return dict(cls=PPO, discrete=False, hyperparams=hp)
 
+    if algo == "ppo_adv":
+        # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados. Misma clase PPO,
+        # mismo CustomCNN/wrappers y acción continua que el baseline; difiere en:
+        #  - learning_rate menor (política más estable),
+        #  - n_steps mayor (mejor estimación de ventaja / rollouts más largos),
+        #  - ent_coef>0 (más exploración, evita colapso prematuro), vf_coef explícito.
+        # NOTA: NO multimapa. Se descartó map=all porque rompe el flujo model-first
+        # (set_env requiere mismo num_envs: 5 != 1). Se entrena en un solo mapa.
+        hp = dict(
+            learning_rate=1e-4,
+            n_steps=4_096,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01,
+            vf_coef=0.5,
+        )
+        if smoke:
+            hp.update(n_steps=128, batch_size=64, n_epochs=2)
+        return dict(cls=PPO, discrete=False, hyperparams=hp)
+
+    if algo == "ppo_adv_v2":
+        # Fase 3 (v2, CONSERVADORA): PPO casi idéntico al baseline ganador, con una mejora
+        # real y pequeña: regularización/exploración por entropía suave (ent_coef=0.001).
+        # ppo_adv (v1) degradó la política; v2 se mantiene cerca del baseline para no romper
+        # lo que funciona. Misma clase PPO, CustomCNN, wrappers, model-first y acción continua.
+        hp = dict(
+            learning_rate=3e-4,
+            n_steps=2_048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.001,
+            vf_coef=0.5,
+        )
+        if smoke:
+            hp.update(n_steps=128, batch_size=64, n_epochs=2)
+        return dict(cls=PPO, discrete=False, hyperparams=hp)
+
     if algo == "sac":
         hp = dict(
             learning_rate=3e-4,
@@ -155,11 +211,13 @@ def resolve_maps(map_arg: str) -> list[str]:
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Entrenar DQN/PPO/SAC en Duckietown.")
-    p.add_argument("--algo", required=True, choices=["dqn", "ppo", "sac"])
+    p.add_argument("--algo", required=True,
+                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"])
     p.add_argument("--map", default="all",
                    help="Nombre exacto de TRAIN_MAPS o 'all' (default).")
     p.add_argument("--timesteps", type=int, default=1_000_000)
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=42,
+                   help="Semilla para random/numpy/torch, el modelo SB3 y el entorno.")
     p.add_argument("--output", default=None,
                    help="Nombre del modelo (sin extensión). Default {algo}_duckie.")
     p.add_argument("--use-mock", action="store_true",
@@ -175,11 +233,42 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    p.add_argument("--init-model", default=None,
+                   help="Ruta a un modelo guardado para CONTINUAR/fine-tune (PPO/ppo_adv*). "
+                        "Si se da, se carga en vez de crear uno nuevo; la clase debe coincidir.")
+    p.add_argument("--learning-rate-override", type=float, default=None,
+                   help="Solo con --init-model: fuerza un learning_rate menor para "
+                        "fine-tuning suave (sobrescribe lr y lr_schedule del modelo cargado).")
     return p.parse_args(argv)
+
+
+def _build_model(spec, env, args, policy_kwargs):
+    """Crea un modelo nuevo, o lo CARGA desde --init-model para continuar (fine-tune)."""
+    if args.init_model:
+        try:
+            model = spec["cls"].load(args.init_model, env=env, device=args.device)
+        except Exception as e:  # clase incompatible, fichero ausente, shapes, etc.
+            raise ValueError(
+                f"No se pudo cargar --init-model '{args.init_model}' como "
+                f"{spec['cls'].__name__} (algo={args.algo}). ¿Coincide el algoritmo/modelo? "
+                f"Detalle: {e}"
+            )
+        print(f"[fine-tune] modelo cargado desde {args.init_model} ({spec['cls'].__name__})")
+        if args.learning_rate_override is not None:
+            lr = args.learning_rate_override
+            model.learning_rate = lr
+            model.lr_schedule = get_schedule_fn(lr)  # SB3 usa lr_schedule en learn()
+            print(f"[fine-tune] learning_rate_override={lr}")
+        return model
+    return spec["cls"](
+        "CnnPolicy", env, policy_kwargs=policy_kwargs, seed=args.seed,
+        device=args.device, verbose=1, **spec["hyperparams"],
+    )
 
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    set_global_seeds(args.seed)
     spec = get_algo_spec(args.algo, smoke=args.smoke)
     maps = resolve_maps(args.map)
     timesteps = 512 if args.smoke else args.timesteps
@@ -189,7 +278,7 @@ def main(argv=None) -> None:
     print("=" * 64)
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")
     print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device} "
-          f"| init-order={args.init_order}")
+          f"| init-order={args.init_order} | seed={args.seed} | init-model={args.init_model}")
     print("=" * 64)
 
     policy_kwargs = dict(
@@ -202,11 +291,8 @@ def main(argv=None) -> None:
         # set_env(real). Evita el segfault de inicializar PPO/torch con Duckietown.
         placeholder = DummyVecEnv(
             [lambda: _PlaceholderEnv(spec["discrete"], args.n_stack)])
-        model = spec["cls"](
-            "CnnPolicy", placeholder, policy_kwargs=policy_kwargs, seed=args.seed,
-            device=args.device, verbose=1, **spec["hyperparams"],
-        )
-        print("[model-first] modelo construido sobre env sintético; creando Duckietown...")
+        model = _build_model(spec, placeholder, args, policy_kwargs)
+        print("[model-first] modelo listo sobre env sintético; creando Duckietown...")
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
                             seed=args.seed, n_stack=args.n_stack)
         model.set_env(env)
@@ -216,10 +302,7 @@ def main(argv=None) -> None:
         # env-first (default): crear el entorno real y luego el modelo.
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
                             seed=args.seed, n_stack=args.n_stack)
-        model = spec["cls"](
-            "CnnPolicy", env, policy_kwargs=policy_kwargs, seed=args.seed,
-            device=args.device, verbose=1, **spec["hyperparams"],
-        )
+        model = _build_model(spec, env, args, policy_kwargs)
 
     # Logger nativo SB3: stdout + CSV (sin dependencias nuevas).
     log_path = os.path.join(args.log_dir, args.algo)
