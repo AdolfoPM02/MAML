@@ -39,6 +39,10 @@ STAGES = {
     # Entrenamientos principales.
     "ppo20k": dict(algo="ppo", timesteps=20_000, output="ppo_loop_empty_20k"),
     "ppo50k": dict(algo="ppo", timesteps=50_000, output="ppo_baseline_50k"),
+    # Fase 3: PPO AVANZADO (multimapa map=all + hiperparámetros optimizados, algo=ppo_adv).
+    "ppo_adv5k":  dict(algo="ppo_adv", timesteps=5_000,  output="ppo_advanced_5k",  map="all"),
+    "ppo_adv20k": dict(algo="ppo_adv", timesteps=20_000, output="ppo_advanced_20k", map="all"),
+    "ppo_adv50k": dict(algo="ppo_adv", timesteps=50_000, output="ppo_advanced_50k", map="all"),
     "dqn20k": dict(algo="dqn", timesteps=20_000, output="dqn_loop_empty_20k"),
     "dqn50k": dict(algo="dqn", timesteps=50_000, output="dqn_baseline_50k"),
     "sac20k": dict(algo="sac", timesteps=20_000, output="sac_loop_empty_20k"),
@@ -90,9 +94,15 @@ def _prefix(args: argparse.Namespace) -> str:
     return pre
 
 
+def stage_train_map(args: argparse.Namespace, stage: dict) -> str:
+    """Mapa de ENTRENAMIENTO efectivo. El mapa propio del stage PREVALECE sobre --map
+    (p. ej. ppo_adv* fuerza map=all); si el stage no define mapa, se usa --map."""
+    return stage.get("map", args.map)
+
+
 def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
     return (f'{_prefix(args)}{args.python} train.py '
-            f'--algo {stage["algo"]} --map {args.map} '
+            f'--algo {stage["algo"]} --map {stage_train_map(args, stage)} '
             f'--timesteps {stage["timesteps"]} --output {output} '
             f'--device {args.device} --init-order {args.init_order}')
 
@@ -116,12 +126,13 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     stage = STAGES[args.stage]
     output = args.output or stage["output"]
+    train_map = stage_train_map(args, stage)  # mapa efectivo (stage prevalece sobre --map)
 
-    # SEGURIDAD: jamás entrenar en el mapa de evaluación oculto.
-    if args.map == config.EVAL_MAP:
+    # SEGURIDAD: jamás entrenar en el mapa de evaluación oculto (se comprueba el EFECTIVO).
+    if train_map == config.EVAL_MAP:
         raise ValueError(
-            f"'{args.map}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él "
-            f"(descalificación). Usa un mapa de TRAIN_MAPS; loop_obstacles solo se "
+            f"'{train_map}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él "
+            f"(descalificación). Usa un mapa de TRAIN_MAPS o 'all'; loop_obstacles solo se "
             f"evalúa con --allow-eval-hidden."
         )
 
@@ -143,7 +154,7 @@ def main(argv=None) -> None:
     print("=" * 70)
     print(f"PLAN | stage={args.stage} | algo={stage['algo']} | "
           f"timesteps={stage['timesteps']} | output={output}")
-    print(f"     | map(train)={args.map} | device={args.device} ({gpu}) | "
+    print(f"     | map(train)={train_map} | device={args.device} ({gpu}) | "
           f"eval_after={args.eval_after} | allow_eval_hidden={args.allow_eval_hidden} | "
           f"execute={execute}")
     print("=" * 70)

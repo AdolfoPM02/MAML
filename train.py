@@ -119,6 +119,28 @@ def get_algo_spec(algo: str, smoke: bool) -> dict:
             hp.update(n_steps=128, batch_size=64, n_epochs=2)
         return dict(cls=PPO, discrete=False, hyperparams=hp)
 
+    if algo == "ppo_adv":
+        # Fase 3: PPO AVANZADO (multimapa + hiperparámetros optimizados). Misma clase PPO,
+        # mismo CustomCNN/wrappers y acción continua que el baseline; difiere en:
+        #  - learning_rate menor (política más estable),
+        #  - n_steps mayor (mejor estimación de ventaja en mapas variados),
+        #  - ent_coef>0 (más exploración, evita colapso prematuro), vf_coef explícito.
+        # Se entrena en map=all (los 5 TRAIN_MAPS) para mejorar la generalización.
+        hp = dict(
+            learning_rate=1e-4,
+            n_steps=4_096,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.01,
+            vf_coef=0.5,
+        )
+        if smoke:
+            hp.update(n_steps=128, batch_size=64, n_epochs=2)
+        return dict(cls=PPO, discrete=False, hyperparams=hp)
+
     if algo == "sac":
         hp = dict(
             learning_rate=3e-4,
@@ -155,7 +177,7 @@ def resolve_maps(map_arg: str) -> list[str]:
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Entrenar DQN/PPO/SAC en Duckietown.")
-    p.add_argument("--algo", required=True, choices=["dqn", "ppo", "sac"])
+    p.add_argument("--algo", required=True, choices=["dqn", "ppo", "ppo_adv", "sac"])
     p.add_argument("--map", default="all",
                    help="Nombre exacto de TRAIN_MAPS o 'all' (default).")
     p.add_argument("--timesteps", type=int, default=1_000_000)
