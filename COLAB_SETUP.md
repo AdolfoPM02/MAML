@@ -14,6 +14,12 @@ real** sobre **Google Colab**, respetando el contrato de evaluación del reto.
 > entrenamientos largos (`run_training_plan.py`) **NO son obligatorios para evaluar**: el
 > profesor solo carga `best_agent.zip` y evalúa. Las runs de entrenamiento son para
 > reproducir/comparar los experimentos (ver `EXPERIMENTS.md`).
+>
+> **Fase 3 (experimental).** Se probaron varias variantes avanzadas (PPO avanzado v1/v2,
+> PPO fine-tuning y SAC); **ninguna superó al PPO 20k** en el mapa oculto, así que el
+> modelo final se mantiene como `best_agent.zip` = PPO 20k. Esos entrenamientos **no son
+> necesarios para la entrega**: el profesor solo necesita ejecutar la evaluación del
+> modelo final.
 
 > El entrenamiento real **no** puede hacerse en local por el conflicto de dependencias
 > de Duckietown (`numpy<=1.20`). Colab es el entorno objetivo. El profesor pide

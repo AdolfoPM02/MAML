@@ -188,3 +188,41 @@ para entrenamiento (bloqueado por `ValueError` en el código).
 > excepción `!best_agent.zip` del `.gitignore`; el notebook lo copia a `models/`
 > automáticamente. Carga final verificada con `eval.py` en `loop_empty`, `episodes=1`,
 > `device=cpu`, `init-order=model-first` → sin error, `length 1500.0`.
+
+## Resultados finales de Fase 3
+
+Tabla comparativa completa (Colab, GPU; `eval.py` con `--init-order model-first`, 3
+episodios por mapa). Formato: `recompensa media ± std / longitud media`.
+`loop_obstacles` es el mapa oculto, usado **solo para evaluación final** (con
+`--allow-eval-hidden`), **nunca para entrenamiento**.
+
+| modelo / stage | loop_empty | small_loop | loop_obstacles | decisión |
+|---|---|---|---|---|
+| DQN 20k | −1013.352 ± 27.031 / 112.3 | −1001.872 ± 46.784 / 86.3 | −1065.766 ± 20.149 / 61.0 | descartado |
+| DQN 50k | −1047.611 ± 76.916 / 82.0 | −1016.568 ± 65.748 / 74.3 | −1032.042 ± 52.425 / 36.7 | descartado |
+| **PPO 20k** | **960.964 ± 605.380 / 1500** | **317.489 ± 703.306 / 1500** | **1118.216 ± 488.214 / 1500** | **GANADOR (best_agent.zip)** |
+| PPO 50k | −813.731 ± 210.545 / 1500 | −1238.875 ± 393.613 / 1500 | −1105.378 ± 760.645 / 1500 | descartado (degrada) |
+| SAC 20k | 990.616 ± 139.264 / 1500 | −1253.567 ± 120.299 / 295.7 | 915.236 ± 571.946 / 1500 | no supera a PPO 20k |
+| SAC 50k | — | — | — | no completado (interrumpido ~30k ts) |
+| PPO avanzado v1 (ppo_adv20k) | −997.117 ± 604.477 | −1194.933 ± 1355.062 | −1538.882 ± 911.956 | descartado |
+| PPO avanzado v1 (ppo_adv50k) | — | — | −1078.173 ± 162.939 | descartado |
+| PPO avanzado v2 (ppo_adv_v2_20k) | −188.287 ± 1720.889 | −84.740 ± 1053.777 | 138.729 ± 1614.885 | no supera a PPO 20k |
+| PPO fine-tuned (ppo_finetuned_5k) | −364.158 ± 1791.466 | 821.278 ± 328.210 | 513.225 ± 1172.583 | no supera a PPO 20k |
+
+### Decisión final (honesta)
+La **Fase 3 se implementó y evaluó con varias variantes avanzadas** —PPO avanzado v1
+(hiperparámetros agresivos), PPO avanzado v2 (conservador, `ent_coef=0.001`) y PPO
+**fine-tuning** desde el ganador (`--init-model`, `lr=5e-5`)—, además de SAC. **Ninguna
+superó al PPO 20k baseline en el criterio principal**: la recompensa media en el mapa
+oculto `loop_obstacles`.
+
+- **PPO 20k** es el mejor en `loop_obstacles` (**1118.216**) y positivo en los tres mapas.
+- **PPO 50k** degrada (recompensas negativas): más entrenamiento no ayuda.
+- **SAC 20k** es competitivo en `loop_empty`/`loop_obstacles` (915.236) pero generaliza mal
+  a `small_loop`; **SAC 50k no se completó** (interrumpido en Colab ~30k ts, sin artefacto).
+- **PPO avanzado v1** se descarta (recompensas muy negativas). **v2** mejora respecto a v1
+  pero queda lejos del baseline. El **fine-tuning** mejora `small_loop` (821.278) pero su
+  `loop_obstacles` (513.225) **no alcanza** al PPO 20k (1118.216).
+
+**Por tanto, el modelo final se mantiene como `best_agent.zip` = PPO 20k**
+(`ppo_loop_empty_20k_gpu`). No se sustituye.
