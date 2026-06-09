@@ -33,8 +33,9 @@ tres fases: (1) Q-Learning tabular \emph{desde cero} en \code{FrozenLake-v1}; (2
 baselines con Stable-Baselines3 ---\textbf{DQN} (acción discreta) y \textbf{PPO} (acción
 continua)---; y (3) un algoritmo avanzado, \textbf{SAC}. El modelo final seleccionado es
 un \textbf{PPO entrenado 20\,000 pasos}, que obtiene la mejor recompensa en el mapa oculto
-de evaluación (\code{loop\_obstacles}) y supera ampliamente a una variante PPO de 50\,000
-pasos que degeneró. Se documenta además la resolución de un \emph{segmentation fault}
+de evaluación (\code{loop\_obstacles}) y \textbf{supera a las demás variantes
+consideradas}: los baselines DQN, la variante PPO de 50\,000 pasos (que degeneró) y el
+algoritmo avanzado SAC 20k. Se documenta además la resolución de un \emph{segmentation fault}
 nativo (Duckietown\,+\,OpenGL\,+\,SB3) mediante un orden de inicialización
 \emph{model-first}, clave para que el pipeline funcione en Google Colab.
 \end{abstract}
@@ -136,19 +137,20 @@ Tabla~\ref{tab:res} compara los tres algoritmos (DQN, PPO, SAC) en sus variantes
 
 \begin{table}[h]
 \centering
-\small
-\begin{tabular}{llrrr}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrrl}
 \toprule
-\textbf{Modelo} & \textbf{ts} & \textbf{loop\_empty} & \textbf{small\_loop} & \textbf{loop\_obstacles} \\
+\textbf{Modelo} & \textbf{ts} & \textbf{loop\_empty} & \textbf{small\_loop} & \textbf{loop\_obstacles} & \textbf{decisión} \\
 \midrule
-DQN 20k & 20k & $-1013.4 \pm 27.0\,/\,112$ & $-1001.9 \pm 46.8\,/\,86$ & $-1065.8 \pm 20.1\,/\,61$ \\
-DQN 50k & 50k & $-1047.6 \pm 76.9\,/\,82$ & $-1016.6 \pm 65.7\,/\,74$ & $-1032.0 \pm 52.4\,/\,37$ \\
+DQN 20k & 20k & $-1013.4 \pm 27.0\,/\,112$ & $-1001.9 \pm 46.8\,/\,86$ & $-1065.8 \pm 20.1\,/\,61$ & descartado \\
+DQN 50k & 50k & $-1047.6 \pm 76.9\,/\,82$ & $-1016.6 \pm 65.7\,/\,74$ & $-1032.0 \pm 52.4\,/\,37$ & descartado \\
 \midrule
-\textbf{PPO 20k} & 20k & $\mathbf{961.0 \pm 605.4\,/\,1500}$ & $\mathbf{317.5 \pm 703.3\,/\,1500}$ & $\mathbf{1118.2 \pm 488.2\,/\,1500}$ \\
-PPO 50k & 50k & $-813.7 \pm 210.5\,/\,1500$ & $-1238.9 \pm 393.6\,/\,1500$ & $-1105.4 \pm 760.6\,/\,1500$ \\
+\textbf{PPO 20k} & 20k & $\mathbf{961.0 \pm 605.4\,/\,1500}$ & $\mathbf{317.5 \pm 703.3\,/\,1500}$ & $\mathbf{1118.2 \pm 488.2\,/\,1500}$ & \textbf{GANADOR} \\
+PPO 50k & 50k & $-813.7 \pm 210.5\,/\,1500$ & $-1238.9 \pm 393.6\,/\,1500$ & $-1105.4 \pm 760.6\,/\,1500$ & descartado \\
 \midrule
-SAC 20k & 20k & $990.6 \pm 139.3\,/\,1500$ & $-1253.6 \pm 120.3\,/\,296$ & $915.2 \pm 571.9\,/\,1500$ \\
-SAC 50k & 50k & \multicolumn{3}{c}{\emph{no completado (ver nota)}} \\
+SAC 20k & 20k & $990.6 \pm 139.3\,/\,1500$ & $-1253.6 \pm 120.3\,/\,296$ & $915.2 \pm 571.9\,/\,1500$ & no gana \\
+SAC 50k & 50k & \multicolumn{3}{c}{\emph{no completado (ver nota)}} & --- \\
 \bottomrule
 \end{tabular}
 \caption{Evaluación de los tres algoritmos. \code{loop\_obstacles} es el mapa oculto,
@@ -217,9 +219,14 @@ Protocolo y tabla de experimentos en \code{EXPERIMENTS.md}. Comandos principales
 python scripts/run_training_plan.py --stage ppo20k --execute \
     --eval-after --init-order model-first
 
-# Evaluación del modelo final
+# Evaluación del modelo final (mapa permitido)
 python eval.py --algo ppo --model models/best_agent \
     --map Duckietown-loop_empty-v0 --init-order model-first --device cpu
+
+# Evaluación opcional en el mapa oculto (SOLO evaluación)
+python eval.py --algo ppo --model models/best_agent \
+    --map Duckietown-loop_obstacles-v0 --allow-eval \
+    --init-order model-first --device cpu
 \end{verbatim}
 
 \end{document}
