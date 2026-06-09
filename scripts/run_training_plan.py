@@ -50,6 +50,12 @@ STAGES = {
     "ppo_adv_v2_5k":  dict(algo="ppo_adv_v2", timesteps=5_000,  output="ppo_advanced_v2_5k"),
     "ppo_adv_v2_20k": dict(algo="ppo_adv_v2", timesteps=20_000, output="ppo_advanced_v2_20k"),
     "ppo_adv_v2_50k": dict(algo="ppo_adv_v2", timesteps=50_000, output="ppo_advanced_v2_50k"),
+    # Fase 3 (FINE-TUNING): continuar entrenando desde el modelo GANADOR (best_agent.zip).
+    # Single-map (loop_empty); init-order model-first sigue funcionando (1 env == 1 env).
+    "ppo_ft5k":  dict(algo="ppo", timesteps=5_000,  output="ppo_finetuned_5k",
+                      init_model="models/best_agent.zip", learning_rate_override=5e-5),
+    "ppo_ft10k": dict(algo="ppo", timesteps=10_000, output="ppo_finetuned_10k",
+                      init_model="models/best_agent.zip", learning_rate_override=5e-5),
     "dqn20k": dict(algo="dqn", timesteps=20_000, output="dqn_loop_empty_20k"),
     "dqn50k": dict(algo="dqn", timesteps=50_000, output="dqn_baseline_50k"),
     "sac20k": dict(algo="sac", timesteps=20_000, output="sac_loop_empty_20k"),
@@ -110,10 +116,15 @@ def stage_train_map(args: argparse.Namespace, stage: dict) -> str:
 
 
 def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
-    return (f'{_prefix(args)}{args.python} train.py '
-            f'--algo {stage["algo"]} --map {stage_train_map(args, stage)} '
-            f'--timesteps {stage["timesteps"]} --output {output} '
-            f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
+    cmd = (f'{_prefix(args)}{args.python} train.py '
+           f'--algo {stage["algo"]} --map {stage_train_map(args, stage)} '
+           f'--timesteps {stage["timesteps"]} --output {output} '
+           f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
+    if stage.get("init_model"):  # fine-tuning: continuar desde un modelo guardado
+        cmd += f' --init-model {stage["init_model"]}'
+        if stage.get("learning_rate_override") is not None:
+            cmd += f' --learning-rate-override {stage["learning_rate_override"]}'
+    return cmd
 
 
 def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[str]:

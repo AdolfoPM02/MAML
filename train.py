@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from stable_baselines3 import DQN, PPO, SAC
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.utils import get_schedule_fn
 
 import gymnasium as gym
 import numpy as np
@@ -232,7 +233,37 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
+    p.add_argument("--init-model", default=None,
+                   help="Ruta a un modelo guardado para CONTINUAR/fine-tune (PPO/ppo_adv*). "
+                        "Si se da, se carga en vez de crear uno nuevo; la clase debe coincidir.")
+    p.add_argument("--learning-rate-override", type=float, default=None,
+                   help="Solo con --init-model: fuerza un learning_rate menor para "
+                        "fine-tuning suave (sobrescribe lr y lr_schedule del modelo cargado).")
     return p.parse_args(argv)
+
+
+def _build_model(spec, env, args, policy_kwargs):
+    """Crea un modelo nuevo, o lo CARGA desde --init-model para continuar (fine-tune)."""
+    if args.init_model:
+        try:
+            model = spec["cls"].load(args.init_model, env=env, device=args.device)
+        except Exception as e:  # clase incompatible, fichero ausente, shapes, etc.
+            raise ValueError(
+                f"No se pudo cargar --init-model '{args.init_model}' como "
+                f"{spec['cls'].__name__} (algo={args.algo}). ¿Coincide el algoritmo/modelo? "
+                f"Detalle: {e}"
+            )
+        print(f"[fine-tune] modelo cargado desde {args.init_model} ({spec['cls'].__name__})")
+        if args.learning_rate_override is not None:
+            lr = args.learning_rate_override
+            model.learning_rate = lr
+            model.lr_schedule = get_schedule_fn(lr)  # SB3 usa lr_schedule en learn()
+            print(f"[fine-tune] learning_rate_override={lr}")
+        return model
+    return spec["cls"](
+        "CnnPolicy", env, policy_kwargs=policy_kwargs, seed=args.seed,
+        device=args.device, verbose=1, **spec["hyperparams"],
+    )
 
 
 def main(argv=None) -> None:
@@ -247,7 +278,7 @@ def main(argv=None) -> None:
     print("=" * 64)
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")
     print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device} "
-          f"| init-order={args.init_order} | seed={args.seed}")
+          f"| init-order={args.init_order} | seed={args.seed} | init-model={args.init_model}")
     print("=" * 64)
 
     policy_kwargs = dict(
@@ -260,11 +291,8 @@ def main(argv=None) -> None:
         # set_env(real). Evita el segfault de inicializar PPO/torch con Duckietown.
         placeholder = DummyVecEnv(
             [lambda: _PlaceholderEnv(spec["discrete"], args.n_stack)])
-        model = spec["cls"](
-            "CnnPolicy", placeholder, policy_kwargs=policy_kwargs, seed=args.seed,
-            device=args.device, verbose=1, **spec["hyperparams"],
-        )
-        print("[model-first] modelo construido sobre env sintético; creando Duckietown...")
+        model = _build_model(spec, placeholder, args, policy_kwargs)
+        print("[model-first] modelo listo sobre env sintético; creando Duckietown...")
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
                             seed=args.seed, n_stack=args.n_stack)
         model.set_env(env)
@@ -274,10 +302,7 @@ def main(argv=None) -> None:
         # env-first (default): crear el entorno real y luego el modelo.
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
                             seed=args.seed, n_stack=args.n_stack)
-        model = spec["cls"](
-            "CnnPolicy", env, policy_kwargs=policy_kwargs, seed=args.seed,
-            device=args.device, verbose=1, **spec["hyperparams"],
-        )
+        model = _build_model(spec, env, args, policy_kwargs)
 
     # Logger nativo SB3: stdout + CSV (sin dependencias nuevas).
     log_path = os.path.join(args.log_dir, args.algo)
