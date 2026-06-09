@@ -149,20 +149,37 @@ contrato en un Colab limpio.
 ## Resultados finales (Colab, GPU)
 
 Entrenamiento real en Colab con el stack validado (§3-bis) y `--init-order model-first`.
-Evaluación con `eval.py` (model-first), 3 episodios por mapa salvo indicación.
+Evaluación con `eval.py` (model-first), 3 episodios por mapa. Formato: `recompensa media
+± std / longitud media`.
 
-| stage      | device | timesteps | loop_empty (rew ± std / len) | small_loop (rew ± std / len) | loop_obstacles (rew ± std / len) | conclusión |
-|------------|--------|-----------|------------------------------|------------------------------|----------------------------------|------------|
-| ppo20k_gpu | GPU    | 20 000    | 960.964 ± 605.380 / 1500.0   | 317.528 ± 703.254 / 1500.0   | 1118.216 ± 488.214 / 1500.0      | **GANADOR** |
-| ppo50k_gpu | GPU    | 50 000    | −813.731 ± 210.545 / 1500.0  | −1238.875 ± 393.613 / 1500.0 | −1105.378 ± 760.645 / 1500.0     | descartado (recompensas negativas) |
+| algoritmo / stage | output | timesteps | loop_empty | small_loop | loop_obstacles | decisión |
+|---|---|---|---|---|---|---|
+| DQN 20k | `dqn_loop_empty_20k` | 20 000 | −1013.352 ± 27.031 / 112.3 | −1001.872 ± 46.784 / 86.3 | −1065.766 ± 20.149 / 61.0 | descartado |
+| DQN 50k | `dqn_baseline_50k` | 50 000 | −1047.611 ± 76.916 / 82.0 | −1016.568 ± 65.748 / 74.3 | −1032.042 ± 52.425 / 36.7 | descartado |
+| **PPO 20k** | `ppo_loop_empty_20k_gpu` | 20 000 | 960.964 ± 605.380 / 1500.0 | 317.528 ± 703.254 / 1500.0 | **1118.216 ± 488.214 / 1500.0** | **GANADOR** |
+| PPO 50k | `ppo_loop_empty_50k_gpu` | 50 000 | −813.731 ± 210.545 / 1500.0 | −1238.875 ± 393.613 / 1500.0 | −1105.378 ± 760.645 / 1500.0 | descartado |
+| SAC 20k | `sac_loop_empty_20k` | 20 000 | 990.616 ± 139.264 / 1500.0 | −1253.567 ± 120.299 / 295.7 | 915.236 ± 571.946 / 1500.0 | evaluado, no supera a PPO 20k |
+| SAC 50k | `sac_advanced_50k` | 50 000 (objetivo) | — | — | — | **no completado** (ver nota) |
 
-**Modelo ganador: `ppo_loop_empty_20k_gpu`.** Mejor recompensa en `loop_obstacles`
-(1118.216) y positiva en los tres mapas. **`ppo50k_gpu` NO se selecciona**: aunque
-mantiene `length 1500.0`, obtiene **recompensas negativas en los tres mapas** (más
-timesteps no mejoró; probable degradación de la política).
+**Modelo ganador: `ppo_loop_empty_20k_gpu`** (entregado como `best_agent.zip`). Es el de
+mejor equilibrio global y la **mejor recompensa en el mapa oculto `loop_obstacles`**
+(1118.216), por encima de SAC 20k (915.236) y de todo DQN. Lecturas por algoritmo:
+- **DQN (20k y 50k):** baseline discreto **descartado** — recompensas negativas y
+  **episodios muy cortos** (longitudes 36–112 ≪ 1500), el agente falla pronto;
+  entrenar más (50k) no mejora.
+- **PPO:** 20k es el ganador; **PPO 50k se descartó** (recompensas negativas: más
+  entrenamiento degradó la política).
+- **SAC 20k:** algoritmo avanzado **implementado, entrenado y evaluado**; buen
+  `loop_empty` (990.616) y `loop_obstacles` (915.236) pero **mala generalización en
+  `small_loop`** (negativa, longitud 295.7) y **no supera a PPO 20k** en el mapa oculto.
+
+> **Nota — SAC 50k (no completado):** la ejecución se **interrumpió en Colab alrededor de
+> 30 000 timesteps tras más de 6 h** y **no se generó el artefacto `sac_advanced_50k.zip`**.
+> Por reproducibilidad y trazabilidad, **no se incluye como métrica cuantitativa válida**;
+> figura solo como intento no completado.
 
 `loop_obstacles` se usó **solo para evaluación** con `--allow-eval-hidden`; **nunca**
-para entrenamiento.
+para entrenamiento (bloqueado por `ValueError` en el código).
 
 > **`best_agent.zip` = copia de `ppo_loop_empty_20k_gpu.zip`** (4.6 MB), generada en
 > Colab con `cp models/ppo_loop_empty_20k_gpu.zip models/best_agent.zip` (nombre que pide

@@ -9,6 +9,11 @@ real** sobre **Google Colab**, respetando el contrato de evaluación del reto.
 > `Challenge_RL.ipynb` y ejecutar**. No necesita clonar GitHub ni subir el modelo aparte:
 > el notebook usa los archivos locales y copia `best_agent.zip` a `models/`
 > automáticamente. **Clonar desde GitHub queda como camino de desarrollo / *fallback*.**
+>
+> **`best_agent.zip` = PPO 20k** (`ppo_loop_empty_20k_gpu`), el modelo ganador. Los
+> entrenamientos largos (`run_training_plan.py`) **NO son obligatorios para evaluar**: el
+> profesor solo carga `best_agent.zip` y evalúa. Las runs de entrenamiento son para
+> reproducir/comparar los experimentos (ver `EXPERIMENTS.md`).
 
 > El entrenamiento real **no** puede hacerse en local por el conflicto de dependencias
 > de Duckietown (`numpy<=1.20`). Colab es el entorno objetivo. El profesor pide
