@@ -10,6 +10,9 @@
 \usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
 \usepackage{enumitem}
 \setlist{itemsep=2pt,topsep=3pt}
+\usepackage{titlesec}
+% Cada heading de nivel 1 (\section, incl. \section*) empieza en página nueva.
+\newcommand{\sectionbreak}{\clearpage}
 
 \newcommand{\code}[1]{\texttt{#1}}
 \sloppy
@@ -128,27 +131,37 @@ entrenamiento (\code{ValueError}) y solo se usa para evaluación.
 
 \section{Resultados}
 Evaluación con \code{eval.py} (3 episodios por mapa, política determinista). La
-Tabla~\ref{tab:res} compara el ganador (PPO 20k) con la variante de 50k.
+Tabla~\ref{tab:res} compara los tres algoritmos (DQN, PPO, SAC) en sus variantes de 20k y
+50k. Cada celda es \emph{recompensa media\,$\pm$\,std / longitud media}.
 
 \begin{table}[h]
 \centering
-\begin{tabular}{llrr}
+\small
+\begin{tabular}{llrrr}
 \toprule
-\textbf{Modelo} & \textbf{Mapa} & \textbf{Recompensa (media\,$\pm$\,std)} & \textbf{Longitud} \\
+\textbf{Modelo} & \textbf{ts} & \textbf{loop\_empty} & \textbf{small\_loop} & \textbf{loop\_obstacles} \\
 \midrule
-\textbf{PPO 20k (ganador)} & loop\_empty     & $960.964 \pm 605.380$  & $1500.0$ \\
-\textbf{PPO 20k (ganador)} & small\_loop     & $317.528 \pm 703.254$  & $1500.0$ \\
-\textbf{PPO 20k (ganador)} & loop\_obstacles & $\mathbf{1118.216 \pm 488.214}$ & $1500.0$ \\
+DQN 20k & 20k & $-1013.4 \pm 27.0\,/\,112$ & $-1001.9 \pm 46.8\,/\,86$ & $-1065.8 \pm 20.1\,/\,61$ \\
+DQN 50k & 50k & $-1047.6 \pm 76.9\,/\,82$ & $-1016.6 \pm 65.7\,/\,74$ & $-1032.0 \pm 52.4\,/\,37$ \\
 \midrule
-PPO 50k (descartado) & loop\_empty     & $-813.731 \pm 210.545$  & $1500.0$ \\
-PPO 50k (descartado) & small\_loop     & $-1238.875 \pm 393.613$ & $1500.0$ \\
-PPO 50k (descartado) & loop\_obstacles & $-1105.378 \pm 760.645$ & $1500.0$ \\
+\textbf{PPO 20k} & 20k & $\mathbf{961.0 \pm 605.4\,/\,1500}$ & $\mathbf{317.5 \pm 703.3\,/\,1500}$ & $\mathbf{1118.2 \pm 488.2\,/\,1500}$ \\
+PPO 50k & 50k & $-813.7 \pm 210.5\,/\,1500$ & $-1238.9 \pm 393.6\,/\,1500$ & $-1105.4 \pm 760.6\,/\,1500$ \\
+\midrule
+SAC 20k & 20k & $990.6 \pm 139.3\,/\,1500$ & $-1253.6 \pm 120.3\,/\,296$ & $915.2 \pm 571.9\,/\,1500$ \\
+SAC 50k & 50k & \multicolumn{3}{c}{\emph{no completado (ver nota)}} \\
 \bottomrule
 \end{tabular}
-\caption{Resultados de evaluación. \code{loop\_obstacles} es el mapa oculto, usado
-\emph{solo} para evaluación. Longitud 1500 = el episodio alcanza el límite de pasos.}
+\caption{Evaluación de los tres algoritmos. \code{loop\_obstacles} es el mapa oculto,
+usado \emph{solo} para evaluación (\code{--allow-eval-hidden}), nunca para entrenar.
+Longitud 1500 = el episodio alcanza el límite de pasos sin terminar antes.
+\textbf{Ganador: PPO 20k} (\code{best\_agent.zip}). \emph{ts} = timesteps.}
 \label{tab:res}
 \end{table}
+
+\noindent\textbf{Nota (SAC 50k).} El intento de SAC a 50k se \textbf{interrumpió en Colab
+en torno a 30k timesteps tras más de 6\,h} y \textbf{no generó el artefacto
+\code{sac\_advanced\_50k.zip}}; por reproducibilidad y trazabilidad \emph{no} se reporta
+como resultado cuantitativo, solo como intento no completado.
 
 \paragraph{Dry-run del contrato.} En un Colab limpio se reconstruyó el entorno desde
 \code{requirements.txt}, se instaló \code{gym-duckietown} aparte, se re-fijó
@@ -171,9 +184,21 @@ negativas en los tres mapas pese a mantener longitud 1500. Es un caso de degrada
 política (probable colapso/entropía baja o sobre-optimización del \emph{proxy} de
 recompensa), un recordatorio de que en RL más entrenamiento no implica mejor política.
 
-\textbf{Baselines y Fase 3.} DQN aporta el baseline discreto y SAC la alternativa avanzada
-continua; ambos comparten arquitectura y wrappers, lo que hace la comparación justa. Dado
-el resultado empírico, el entregable final es PPO 20k.
+\textbf{DQN (baseline discreto).} Tanto 20k como 50k se entrenaron y evaluaron, y se
+\textbf{descartan}: recompensas negativas y, sobre todo, \textbf{episodios muy cortos}
+(longitudes 36--112 frente a 1500), es decir, el agente sale del carril enseguida. Más
+entrenamiento (50k) no lo corrige.
+
+\textbf{SAC (Fase 3, algoritmo avanzado).} SAC se \textbf{implementó, entrenó y evaluó}
+mediante \textbf{SAC 20k}: logra buen desempeño en \code{loop\_empty} (990.6) y en el mapa
+oculto \code{loop\_obstacles} (915.2), pero \textbf{generaliza mal a \code{small\_loop}}
+(recompensa negativa, longitud media 296) y \textbf{no supera a PPO 20k} en el mapa oculto
+(915.2 frente a 1118.2). El intento de SAC 50k no se completó (ver nota de la
+Tabla~\ref{tab:res}), por lo que no se compara cuantitativamente.
+
+\textbf{Decisión final.} DQN, PPO y SAC comparten arquitectura (\code{CustomCNN}) y
+wrappers, lo que hace la comparación justa. Por mejor equilibrio global y mejor resultado
+en el mapa oculto, el entregable final (\code{best\_agent.zip}) es \textbf{PPO 20k}.
 
 \section{Conclusión}
 Se logró un pipeline completo y reproducible (Fase 1 tabular, Fases 2--3 sobre Duckietown)
