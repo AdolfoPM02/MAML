@@ -154,6 +154,26 @@ def get_algo_spec(algo: str, smoke: bool) -> dict:
             hp.update(n_steps=128, batch_size=64, n_epochs=2)
         return dict(cls=PPO, discrete=False, hyperparams=hp)
 
+    if algo == "ppo_adv_v2":
+        # Fase 3 (v2, CONSERVADORA): PPO casi idéntico al baseline ganador, con una mejora
+        # real y pequeña: regularización/exploración por entropía suave (ent_coef=0.001).
+        # ppo_adv (v1) degradó la política; v2 se mantiene cerca del baseline para no romper
+        # lo que funciona. Misma clase PPO, CustomCNN, wrappers, model-first y acción continua.
+        hp = dict(
+            learning_rate=3e-4,
+            n_steps=2_048,
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.99,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            ent_coef=0.001,
+            vf_coef=0.5,
+        )
+        if smoke:
+            hp.update(n_steps=128, batch_size=64, n_epochs=2)
+        return dict(cls=PPO, discrete=False, hyperparams=hp)
+
     if algo == "sac":
         hp = dict(
             learning_rate=3e-4,
@@ -190,7 +210,8 @@ def resolve_maps(map_arg: str) -> list[str]:
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Entrenar DQN/PPO/SAC en Duckietown.")
-    p.add_argument("--algo", required=True, choices=["dqn", "ppo", "ppo_adv", "sac"])
+    p.add_argument("--algo", required=True,
+                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"])
     p.add_argument("--map", default="all",
                    help="Nombre exacto de TRAIN_MAPS o 'all' (default).")
     p.add_argument("--timesteps", type=int, default=1_000_000)

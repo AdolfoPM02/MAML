@@ -45,8 +45,8 @@ def set_global_seeds(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-# ppo_adv (Fase 3) carga con la clase PPO (es PPO con hiperparámetros/entreno avanzado).
-ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "sac": SAC}
+# ppo_adv / ppo_adv_v2 (Fase 3) cargan con la clase PPO (son PPO con hiperparámetros avanzados).
+ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "ppo_adv_v2": PPO, "sac": SAC}
 
 
 class _PlaceholderEnv(gym.Env):
@@ -85,8 +85,10 @@ class _PlaceholderEnv(gym.Env):
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluar un modelo Duckietown guardado.")
-    p.add_argument("--algo", required=True, choices=["dqn", "ppo", "ppo_adv", "sac"],
-                   help="Algoritmo del modelo (elige la clase para .load). ppo_adv usa PPO.")
+    p.add_argument("--algo", required=True,
+                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"],
+                   help="Algoritmo del modelo (elige la clase para .load). "
+                        "ppo_adv y ppo_adv_v2 usan PPO.")
     p.add_argument("--model", required=True,
                    help="Ruta al .zip del modelo (con o sin extensión).")
     p.add_argument("--map", default="Duckietown-loop_empty-v0",

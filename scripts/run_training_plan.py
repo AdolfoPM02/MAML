@@ -46,6 +46,10 @@ STAGES = {
     "ppo_adv5k":  dict(algo="ppo_adv", timesteps=5_000,  output="ppo_advanced_5k"),
     "ppo_adv20k": dict(algo="ppo_adv", timesteps=20_000, output="ppo_advanced_20k"),
     "ppo_adv50k": dict(algo="ppo_adv", timesteps=50_000, output="ppo_advanced_50k"),
+    # Fase 3 v2 (CONSERVADORA): PPO ~baseline + entropía suave (ent_coef=0.001). Single-map.
+    "ppo_adv_v2_5k":  dict(algo="ppo_adv_v2", timesteps=5_000,  output="ppo_advanced_v2_5k"),
+    "ppo_adv_v2_20k": dict(algo="ppo_adv_v2", timesteps=20_000, output="ppo_advanced_v2_20k"),
+    "ppo_adv_v2_50k": dict(algo="ppo_adv_v2", timesteps=50_000, output="ppo_advanced_v2_50k"),
     "dqn20k": dict(algo="dqn", timesteps=20_000, output="dqn_loop_empty_20k"),
     "dqn50k": dict(algo="dqn", timesteps=50_000, output="dqn_baseline_50k"),
     "sac20k": dict(algo="sac", timesteps=20_000, output="sac_loop_empty_20k"),
