@@ -132,12 +132,13 @@ def get_algo_spec(algo: str, smoke: bool) -> dict:
         return dict(cls=PPO, discrete=False, hyperparams=hp)
 
     if algo == "ppo_adv":
-        # Fase 3: PPO AVANZADO (multimapa + hiperparámetros optimizados). Misma clase PPO,
+        # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados. Misma clase PPO,
         # mismo CustomCNN/wrappers y acción continua que el baseline; difiere en:
         #  - learning_rate menor (política más estable),
-        #  - n_steps mayor (mejor estimación de ventaja en mapas variados),
+        #  - n_steps mayor (mejor estimación de ventaja / rollouts más largos),
         #  - ent_coef>0 (más exploración, evita colapso prematuro), vf_coef explícito.
-        # Se entrena en map=all (los 5 TRAIN_MAPS) para mejorar la generalización.
+        # NOTA: NO multimapa. Se descartó map=all porque rompe el flujo model-first
+        # (set_env requiere mismo num_envs: 5 != 1). Se entrena en un solo mapa.
         hp = dict(
             learning_rate=1e-4,
             n_steps=4_096,

@@ -39,10 +39,13 @@ STAGES = {
     # Entrenamientos principales.
     "ppo20k": dict(algo="ppo", timesteps=20_000, output="ppo_loop_empty_20k"),
     "ppo50k": dict(algo="ppo", timesteps=50_000, output="ppo_baseline_50k"),
-    # Fase 3: PPO AVANZADO (multimapa map=all + hiperparámetros optimizados, algo=ppo_adv).
-    "ppo_adv5k":  dict(algo="ppo_adv", timesteps=5_000,  output="ppo_advanced_5k",  map="all"),
-    "ppo_adv20k": dict(algo="ppo_adv", timesteps=20_000, output="ppo_advanced_20k", map="all"),
-    "ppo_adv50k": dict(algo="ppo_adv", timesteps=50_000, output="ppo_advanced_50k", map="all"),
+    # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
+    # NO multimapa: se descartó map=all porque rompe --init-order model-first
+    # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
+    # y admite override con --map (un mapa permitido); loop_obstacles sigue bloqueado.
+    "ppo_adv5k":  dict(algo="ppo_adv", timesteps=5_000,  output="ppo_advanced_5k"),
+    "ppo_adv20k": dict(algo="ppo_adv", timesteps=20_000, output="ppo_advanced_20k"),
+    "ppo_adv50k": dict(algo="ppo_adv", timesteps=50_000, output="ppo_advanced_50k"),
     "dqn20k": dict(algo="dqn", timesteps=20_000, output="dqn_loop_empty_20k"),
     "dqn50k": dict(algo="dqn", timesteps=50_000, output="dqn_baseline_50k"),
     "sac20k": dict(algo="sac", timesteps=20_000, output="sac_loop_empty_20k"),
