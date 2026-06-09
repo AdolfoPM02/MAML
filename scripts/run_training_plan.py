@@ -63,6 +63,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--eval-after", action="store_true",
                    help="Tras entrenar, evalúa en los mapas definidos.")
     p.add_argument("--episodes", type=int, default=3)
+    p.add_argument("--seed", type=int, default=42,
+                   help="Semilla (se pasa a train.py y eval.py). Default 42.")
     p.add_argument("--device", default="cpu", choices=["auto", "cpu", "cuda"])
     p.add_argument("--use-gpu", action="store_true",
                    help="No fija CUDA_VISIBLE_DEVICES=\"\" (permite GPU). Por defecto se "
@@ -104,7 +106,7 @@ def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
     return (f'{_prefix(args)}{args.python} train.py '
             f'--algo {stage["algo"]} --map {stage_train_map(args, stage)} '
             f'--timesteps {stage["timesteps"]} --output {output} '
-            f'--device {args.device} --init-order {args.init_order}')
+            f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
 
 
 def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[str]:
@@ -113,12 +115,12 @@ def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[st
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} --map {m} '
                     f'--episodes {args.episodes} --device {args.device} '
-                    f'--init-order {args.init_order}')
+                    f'--init-order {args.init_order} --seed {args.seed}')
     if args.allow_eval_hidden:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} '
                     f'--map {config.EVAL_MAP} --episodes {args.episodes} --allow-eval '
-                    f'--device {args.device} --init-order {args.init_order}')
+                    f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
     return cmds
 
 

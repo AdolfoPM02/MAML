@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
+import torch
 from stable_baselines3 import DQN, PPO, SAC
 import gymnasium as gym
 from gymnasium import spaces
@@ -32,6 +34,16 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from src import config
 from src.envs import build_vec_env
+
+
+def set_global_seeds(seed: int) -> None:
+    """Fija la semilla en random, numpy y torch (reproducibilidad razonable; NO promete
+    resultados bit a bit, sobre todo en GPU o con el simulador Duckietown)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 # ppo_adv (Fase 3) carga con la clase PPO (es PPO con hiperparámetros/entreno avanzado).
 ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "sac": SAC}
@@ -87,7 +99,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN, "
                         "NUNCA para entrenamiento. Sin este flag, ese mapa está "
                         "bloqueado por el guard de make_env.")
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=42,
+                   help="Semilla para random/numpy/torch y el entorno de evaluación.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
     p.add_argument("--init-order", default="env-first",
                    choices=["env-first", "model-first"],
@@ -151,11 +164,12 @@ def evaluate(args: argparse.Namespace) -> dict:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    set_global_seeds(args.seed)
     print("=" * 64)
     print(f"EVAL | algo={args.algo} | model={args.model} | map={args.map}")
     print(f"     | episodes={args.episodes} | mock={args.use_mock} | "
           f"allow_eval={args.allow_eval} | deterministic={args.deterministic} | "
-          f"init-order={args.init_order}")
+          f"init-order={args.init_order} | seed={args.seed}")
     print("=" * 64)
 
     m = evaluate(args)

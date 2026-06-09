@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 
 # Permitir importar el paquete src/ ejecutando desde la raíz del proyecto.
@@ -34,6 +35,7 @@ from stable_baselines3.common.logger import configure
 
 import gymnasium as gym
 import numpy as np
+import torch
 from gymnasium import spaces
 from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -43,6 +45,16 @@ from src.envs import build_vec_env
 
 MODELS_DIR = "models"
 DEFAULT_LOG_DIR = "logs"
+
+
+def set_global_seeds(seed: int) -> None:
+    """Fija la semilla en random, numpy y torch (reproducibilidad razonable; NO promete
+    resultados bit a bit, sobre todo en GPU o con el simulador Duckietown)."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 class _PlaceholderEnv(gym.Env):
@@ -181,7 +193,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--map", default="all",
                    help="Nombre exacto de TRAIN_MAPS o 'all' (default).")
     p.add_argument("--timesteps", type=int, default=1_000_000)
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=42,
+                   help="Semilla para random/numpy/torch, el modelo SB3 y el entorno.")
     p.add_argument("--output", default=None,
                    help="Nombre del modelo (sin extensión). Default {algo}_duckie.")
     p.add_argument("--use-mock", action="store_true",
@@ -202,6 +215,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    set_global_seeds(args.seed)
     spec = get_algo_spec(args.algo, smoke=args.smoke)
     maps = resolve_maps(args.map)
     timesteps = 512 if args.smoke else args.timesteps
@@ -211,7 +225,7 @@ def main(argv=None) -> None:
     print("=" * 64)
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")
     print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device} "
-          f"| init-order={args.init_order}")
+          f"| init-order={args.init_order} | seed={args.seed}")
     print("=" * 64)
 
     policy_kwargs = dict(
