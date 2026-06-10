@@ -62,6 +62,23 @@ STAGES = {
         maps=["Duckietown-straight_road-v0", "Duckietown-loop_empty-v0",
               "Duckietown-small_loop-v0", "Duckietown-zigzag_dists-v0",
               "Duckietown-udem1-v0"]),
+    # CURRICULUM PROGRESIVO (fácil -> difícil), un mapa por etapa. El curriculum
+    # paralelo (5 mapas desde cero) fallaba: el agente no aprende conducción básica
+    # antes de exponerse a todo. Aquí: (1) avanzar en straight_road, (2) más estable
+    # en straight_road, (3) fine-tuning en loop_empty desde el modelo de straight.
+    # Todo con action_mode=v_omega; loop_obstacles SOLO en evaluación.
+    "ppo_vomega_straight5k": dict(
+        algo="ppo", timesteps=5_000, output="ppo_vomega_straight_5k",
+        map="Duckietown-straight_road-v0", action_mode="v_omega"),
+    "ppo_vomega_straight20k": dict(
+        algo="ppo", timesteps=20_000, output="ppo_vomega_straight_20k",
+        map="Duckietown-straight_road-v0", action_mode="v_omega"),
+    # Fine-tuning en loop_empty CONTINUANDO desde el modelo de straight_road (20k).
+    # Mismo action_mode (v_omega) -> espacios compatibles para cargar. lr menor (5e-5).
+    "ppo_vomega_loop_ft10k": dict(
+        algo="ppo", timesteps=10_000, output="ppo_vomega_loop_ft_10k",
+        map="Duckietown-loop_empty-v0", action_mode="v_omega",
+        init_model="models/ppo_vomega_straight_20k", learning_rate_override=5e-5),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
