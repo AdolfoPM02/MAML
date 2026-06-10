@@ -126,12 +126,14 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="'default' = spawn aleatorio; 'centerline' = reset filtrado hasta "
                         "una pose inicial válida (drivable).")
     p.add_argument("--video-source", default="auto",
-                   choices=["auto", "wrapper_rgb", "render_obs", "render"],
+                   choices=["auto", "wrapper_rgb", "render_obs", "render", "obs"],
                    help="Fuente del frame de vídeo. 'auto' (default): wrapper_rgb -> "
                         "render_obs -> render -> obs. 'wrapper_rgb': SOLO el frame RGB crudo "
                         "guardado por DuckieWrapper (last_rgb_frame; falla si no existe). "
                         "'render_obs': SOLO render_obs() (falla si no existe). 'render': "
-                        "solo render() (framebuffer; en Xvfb puede salir ruidoso).")
+                        "solo render() (framebuffer; en Xvfb puede salir ruidoso). 'obs': la "
+                        "OBSERVACIÓN del agente (gris 64x64 apilada) convertida a imagen "
+                        "visible; no es la cámara RGB, pero siempre se ve (no ruido).")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -197,6 +199,53 @@ def _first_frame(*specs):
     return None
 
 
+def _normalize_uint8(frame) -> np.ndarray:
+    """Convierte a uint8: float[0,1]->[0,255], cualquier rango -> clip 0..255."""
+    a = np.asarray(frame)
+    if a.dtype == np.uint8:
+        return np.ascontiguousarray(a)
+    a = a.astype(np.float64)
+    if np.nanmax(a) <= 1.0 + 1e-6:     # floats normalizados [0,1]
+        a = a * 255.0
+    return np.clip(a, 0, 255).astype(np.uint8)
+
+
+def _obs_to_frame(obs, upscale_to: int = 256):
+    """Convierte la OBSERVACIÓN del agente en un frame RGB visible (no la cámara real).
+
+    Acepta (1,4,64,64) / (4,64,64) / (1,64,64) / (64,64) / (H,W,C). Devuelve
+    (frame_uint8_RGB, original_shape).
+    """
+    arr = np.asarray(obs)
+    original_shape = tuple(arr.shape)
+
+    while arr.ndim > 3 and arr.shape[0] == 1:   # quitar batch del VecEnv: (1,...) -> (...)
+        arr = arr[0]
+
+    if arr.ndim == 3 and arr.shape[2] in (3, 4):          # ya es HWC RGB(A)
+        gray = None
+        frame = arr[:, :, :3]
+    elif arr.ndim == 3 and arr.shape[0] <= 8 and arr.shape[1] >= 16 and arr.shape[2] >= 16:
+        gray = arr[-1]                                     # último canal del stack (CHW)
+        frame = np.stack([gray, gray, gray], axis=-1)
+    elif arr.ndim == 2:                                    # (H, W) gris
+        gray = arr
+        frame = np.stack([gray, gray, gray], axis=-1)
+    else:                                                  # último recurso: aplanar a 2D
+        gray = arr.reshape(-1, *arr.shape[-2:])[-1]
+        frame = np.stack([gray, gray, gray], axis=-1)
+
+    frame = _normalize_uint8(frame)
+    if upscale_to and frame.shape[0] < upscale_to:        # ampliar para verlo mejor
+        try:
+            import cv2
+            frame = cv2.resize(frame, (upscale_to, upscale_to),
+                               interpolation=cv2.INTER_NEAREST)
+        except Exception:
+            pass                                           # si no hay cv2, dejar tamaño original
+    return np.ascontiguousarray(frame), original_shape
+
+
 def _attr_frame(obj, name: str):
     """Devuelve el atributo `name` de obj si es un frame RGB(A) válido (p. ej. el
     last_rgb_frame que guarda DuckieWrapper), o None."""
@@ -217,6 +266,17 @@ def get_rgb_frame(vec_env, last_obs=None, log: bool = False,
     video_source 'wrapper_rgb'/'render_obs'/'render' se prueba SOLO esa familia y se falla
     si no existe. 'auto' las prueba en orden y, último recurso, cae a la observación (WARN).
     """
+    # 'obs': usar SIEMPRE la observación del agente (sin render ni last_rgb_frame).
+    if video_source == "obs":
+        if last_obs is None:
+            raise RuntimeError("--video-source obs requiere una observación (last_obs).")
+        frame, orig = _obs_to_frame(last_obs)
+        if log and not _FRAME_SOURCE_LOGGED["done"]:
+            print(f"  [video] frame source=obs_processed | original_shape={orig} | "
+                  f"final_shape={frame.shape} | dtype={frame.dtype}")
+            _FRAME_SOURCE_LOGGED["done"] = True
+        return frame
+
     base = None
     try:
         base = vec_env.venv.envs[0]            # DuckieWrapper
@@ -279,13 +339,11 @@ def get_rgb_frame(vec_env, last_obs=None, log: bool = False,
 
     # Fallback EXPLÍCITO a la observación (no es un render real): solo para no fallar.
     if last_obs is not None:
-        obs = np.asarray(last_obs)
-        gray = obs.reshape(-1, *obs.shape[-2:])[-1]   # último frame apilado (H, W)
-        rgb = np.repeat(gray[:, :, None], 3, axis=2).astype(np.uint8)
+        rgb, orig = _obs_to_frame(last_obs)
         if log and not _FRAME_SOURCE_LOGGED["done"]:
             print(f"  [video][WARNING] render del simulador no disponible; usando la "
-                  f"OBSERVACIÓN del agente como frame (gris {rgb.shape}). El vídeo NO "
-                  f"mostrará Duckietown real.")
+                  f"OBSERVACIÓN del agente (obs_processed | original_shape={orig} | "
+                  f"final_shape={rgb.shape}). El vídeo NO mostrará Duckietown real.")
             _FRAME_SOURCE_LOGGED["done"] = True
         return rgb
 
