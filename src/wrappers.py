@@ -14,6 +14,8 @@ ambos comparten la interfaz definida en `duckie_factory.make_base_env`.
 
 from __future__ import annotations
 
+import warnings
+
 import cv2
 import gymnasium as gym
 import numpy as np
@@ -45,10 +47,25 @@ class DuckieWrapper(gym.Env):
 
     def __init__(self, env_name: str = config.TRAIN_MAPS[0],
                  use_mock: bool | None = None, seed: int = 0,
-                 action_mode: str = "wheels"):
+                 action_mode: str = "wheels",
+                 reset_mode: str = "default", max_reset_attempts: int = 20):
         super().__init__()
         self.env_name = env_name
         self.env = make_base_env(env_name, use_mock=use_mock, seed=seed)
+
+        # --- MODO DE RESET ---------------------------------------------------
+        # "default": comportamiento original (spawn aleatorio del simulador).
+        # "centerline": reset FILTRADO. Muchos episodios empezaban con pose/orientación
+        # mala -> Invalid pose / not drivable inmediato. Aquí repetimos reset() hasta
+        # obtener una pose VÁLIDA (drivable) según el propio simulador (env._valid_pose),
+        # hasta max_reset_attempts; si ninguna vale, se avisa y se usa la última. En el
+        # mock (sin pose) es un no-op. No fijamos coordenadas por mapa (no fiables); el
+        # filtrado es reproducible dado el seed (primera pose válida de la secuencia RNG).
+        if reset_mode not in ("default", "centerline"):
+            raise ValueError(
+                f"reset_mode debe ser 'default' o 'centerline'; recibido {reset_mode!r}.")
+        self._reset_mode = reset_mode
+        self._max_reset_attempts = int(max_reset_attempts)
 
         # --- SEMÁNTICA REAL DE LA ACCIÓN -------------------------------------
         # El simulador de Duckietown (gym_duckietown.DuckietownEnv.step) NO espera
@@ -113,9 +130,32 @@ class DuckieWrapper(gym.Env):
         )
         return processed
 
+    def _pose_ok(self) -> bool:
+        """True si la pose inicial es válida/drivable según el simulador. Si no podemos
+        comprobarlo (mock, o el env no expone _valid_pose), devolvemos True para no romper."""
+        valid_fn = getattr(self.env, "_valid_pose", None)
+        pos = getattr(self.env, "cur_pos", None)
+        ang = getattr(self.env, "cur_angle", None)
+        if valid_fn is None or pos is None:
+            return True
+        try:
+            return bool(valid_fn(pos, ang))
+        except Exception:
+            return True
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         obs = self.env.reset()
+        if self._reset_mode == "centerline" and getattr(self.env, "cur_pos", None) is not None:
+            # Reset FILTRADO: repetir hasta una pose válida (drivable) o agotar intentos.
+            attempts = 1
+            while not self._pose_ok() and attempts < self._max_reset_attempts:
+                obs = self.env.reset()
+                attempts += 1
+            if not self._pose_ok():
+                warnings.warn(
+                    f"reset_mode=centerline: sin pose válida en {self._max_reset_attempts} "
+                    f"intentos ({self.env_name}); se usa la última.")
         return self._process_obs(obs), {}
 
     def _map_action(self, action) -> tuple[np.ndarray, np.ndarray, dict]:

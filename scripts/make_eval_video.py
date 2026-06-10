@@ -121,6 +121,9 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "'wheels' = [left_wheel, right_wheel]; 'v_omega' = [v, omega] -> "
                         "ruedas; 'v_omega_safe' = v_omega acotado; 'safe_discrete' = "
                         "Discrete(5) de maniobras seguras.")
+    p.add_argument("--reset-mode", default="default", choices=["default", "centerline"],
+                   help="'default' = spawn aleatorio; 'centerline' = reset filtrado hasta "
+                        "una pose inicial válida (drivable).")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -172,7 +175,7 @@ def make_video(args: argparse.Namespace) -> dict:
     vec_env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
-                            action_mode=args.action_mode)
+                            action_mode=args.action_mode, reset_mode=args.reset_mode)
     model.set_env(vec_env)
     placeholder.close()
 

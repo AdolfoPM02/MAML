@@ -116,6 +116,17 @@ STAGES = {
         algo="ppo", timesteps=10_000, output="ppo_safe_discrete_straight_to_loop_10k",
         map="Duckietown-loop_empty-v0", action_mode="safe_discrete",
         init_model="models/ppo_safe_discrete_straight_10k"),
+    # RESET CONTROLADO (centerline): los spawns aleatorios empezaban a menudo fuera de la
+    # carretera (Invalid pose). 'centerline' repite reset() hasta una pose válida. Se aplica
+    # en ENTRENAMIENTO; la evaluación se deja con reset por defecto (test honesto).
+    "ppo_safe_discrete_centerline_loop5k": dict(
+        algo="ppo", timesteps=5_000, output="ppo_safe_discrete_centerline_loop_5k",
+        map="Duckietown-loop_empty-v0", action_mode="safe_discrete",
+        reset_mode="centerline"),
+    "ppo_safe_discrete_centerline_loop20k": dict(
+        algo="ppo", timesteps=20_000, output="ppo_safe_discrete_centerline_loop_20k",
+        map="Duckietown-loop_empty-v0", action_mode="safe_discrete",
+        reset_mode="centerline"),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
@@ -206,6 +217,8 @@ def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
             cmd += f' --learning-rate-override {stage["learning_rate_override"]}'
     if stage.get("action_mode"):  # semántica de acción (p. ej. ppo_vomega*)
         cmd += f' --action-mode {stage["action_mode"]}'
+    if stage.get("reset_mode"):  # reset controlado (p. ej. centerline)
+        cmd += f' --reset-mode {stage["reset_mode"]}'
     return cmd
 
 

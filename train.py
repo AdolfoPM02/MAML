@@ -265,6 +265,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "right_wheel]; 'v_omega' = [v, omega] -> ruedas; 'v_omega_safe' = "
                         "v_omega con v/omega acotados; 'safe_discrete' = Discrete(5) de "
                         "maniobras seguras predefinidas (PPO discreto).")
+    p.add_argument("--reset-mode", default="default", choices=["default", "centerline"],
+                   help="'default' = spawn aleatorio del simulador; 'centerline' = reset "
+                        "FILTRADO que repite hasta una pose inicial válida (drivable), "
+                        "evitando empezar fuera de la carretera.")
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     p.add_argument("--init-model", default=None,
@@ -313,7 +317,7 @@ def main(argv=None) -> None:
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")
     print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device} "
           f"| init-order={args.init_order} | seed={args.seed} | init-model={args.init_model} "
-          f"| action_mode={args.action_mode}")
+          f"| action_mode={args.action_mode} | reset_mode={args.reset_mode}")
     print("=" * 64)
 
     policy_kwargs = dict(
@@ -335,7 +339,7 @@ def main(argv=None) -> None:
               f"creando Duckietown...")
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
                             seed=args.seed, n_stack=args.n_stack,
-                            action_mode=args.action_mode)
+                            action_mode=args.action_mode, reset_mode=args.reset_mode)
         model.set_env(env)
         placeholder.close()
         print("[model-first] set_env(entorno real) OK")
@@ -343,7 +347,7 @@ def main(argv=None) -> None:
         # env-first (default): crear el entorno real y luego el modelo.
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
                             seed=args.seed, n_stack=args.n_stack,
-                            action_mode=args.action_mode)
+                            action_mode=args.action_mode, reset_mode=args.reset_mode)
         model = _build_model(spec, env, args, policy_kwargs)
 
     # Logger nativo SB3: stdout + CSV (sin dependencias nuevas).
