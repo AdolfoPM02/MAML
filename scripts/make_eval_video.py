@@ -136,23 +136,106 @@ def parse_args(argv=None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _base_env(vec_env):
-    """Devuelve el DuckieWrapper subyacente (para render RGB): VecFrameStack -> venv -> envs[0]."""
-    return vec_env.venv.envs[0]
+# Se registra UNA vez por make_video() qué ruta de render se usó (diagnóstico).
+_FRAME_SOURCE_LOGGED = {"done": False}
+
+
+def _is_rgb(arr) -> bool:
+    """True si arr parece un frame RGB(A): ndim==3 y 3 o 4 canales. Esto DESCARTA la
+    observación del agente (1x64x64 / 4x64x64 o 64x64 gris), que no es un render válido."""
+    arr = np.asarray(arr)
+    return arr.ndim == 3 and arr.shape[2] in (3, 4)
+
+
+def _coerce_rgb(arr) -> np.ndarray:
+    """Convierte un frame válido a RGB uint8: RGBA -> RGB y dtype -> uint8."""
+    arr = np.asarray(arr)
+    if arr.shape[2] == 4:               # RGBA -> RGB
+        arr = arr[:, :, :3]
+    if arr.dtype != np.uint8:
+        a = arr.astype(np.float64)
+        if np.nanmax(a) <= 1.0 + 1e-6:  # floats en [0,1] -> [0,255]
+            a = a * 255.0
+        arr = np.clip(a, 0, 255).astype(np.uint8)
+    return np.ascontiguousarray(arr)
+
+
+def _try_render(obj):
+    """Intenta obj.render(mode='rgb_array') y, si falla, obj.render(). Devuelve un frame
+    RGB(A) válido o None."""
+    if obj is None:
+        return None
+    for kwargs in ({"mode": "rgb_array"}, {}):
+        try:
+            frame = obj.render(**kwargs)
+        except Exception:
+            continue
+        if frame is not None and _is_rgb(frame):
+            return frame
+    return None
+
+
+def get_rgb_frame(vec_env, last_obs=None, log: bool = False) -> np.ndarray:
+    """Obtiene SIEMPRE un frame RGB del SIMULADOR (no la observación del agente).
+
+    Prueba varias rutas, de la más interna (el env real de Duckietown) a la más externa,
+    quedándose con la primera que devuelva un frame RGB(A) válido. Si ninguna funciona,
+    cae a la observación SOLO como último recurso y con WARNING; si tampoco, lanza error.
+    """
+    base = None
+    try:
+        base = vec_env.venv.envs[0]            # DuckieWrapper
+    except Exception:
+        base = None
+    base_env = getattr(base, "env", None)      # gym_duckietown real (descendiendo por .env)
+    base_unwrapped = getattr(base, "unwrapped", None)
+    venv = getattr(vec_env, "venv", None)
+
+    candidates = [
+        ("venv.envs[0].env.render", base_env),
+        ("venv.envs[0].render", base),
+        ("venv.envs[0].unwrapped.render", base_unwrapped),
+        ("venv.render", venv),
+        ("render", vec_env),
+    ]
+    for name, obj in candidates:
+        frame = _try_render(obj)
+        if frame is not None:
+            rgb = _coerce_rgb(frame)
+            if log and not _FRAME_SOURCE_LOGGED["done"]:
+                print(f"  [video] frame source={name} | shape={rgb.shape} | dtype={rgb.dtype}")
+                _FRAME_SOURCE_LOGGED["done"] = True
+            return rgb
+
+    # Fallback EXPLÍCITO a la observación (no es un render real): solo para no fallar.
+    if last_obs is not None:
+        obs = np.asarray(last_obs)
+        gray = obs.reshape(-1, *obs.shape[-2:])[-1]   # último frame apilado (H, W)
+        rgb = np.repeat(gray[:, :, None], 3, axis=2).astype(np.uint8)
+        if log and not _FRAME_SOURCE_LOGGED["done"]:
+            print(f"  [video][WARNING] render del simulador no disponible; usando la "
+                  f"OBSERVACIÓN del agente como frame (gris {rgb.shape}). El vídeo NO "
+                  f"mostrará Duckietown real.")
+            _FRAME_SOURCE_LOGGED["done"] = True
+        return rgb
+
+    raise RuntimeError(
+        "No se pudo obtener un frame RGB del simulador (render falló en todas las rutas: "
+        "venv.envs[0].env / envs[0] / unwrapped / venv / vec_env) y no hay observación de "
+        "respaldo.")
 
 
 def _run_rollout(model, vec_env, max_steps: int, deterministic: bool):
     """Corre un rollout y devuelve (frames RGB, recompensa acumulada)."""
     frames = []
     obs = vec_env.reset()
-    base = _base_env(vec_env)
-    frames.append(np.asarray(base.render(), dtype=np.uint8))
+    frames.append(get_rgb_frame(vec_env, last_obs=obs, log=True))
     total = 0.0
     for _ in range(max_steps):
         action, _ = model.predict(obs, deterministic=deterministic)
         obs, rewards, dones, _ = vec_env.step(action)
         total += float(rewards[0])
-        frames.append(np.asarray(base.render(), dtype=np.uint8))
+        frames.append(get_rgb_frame(vec_env, last_obs=obs))
         if bool(dones[0]):
             break
     return frames, total
@@ -168,6 +251,7 @@ def _write_video(path: str, frames, fps: int) -> None:
 def make_video(args: argparse.Namespace) -> dict:
     discrete = args.algo == "dqn"
     cls = ALGO_CLASSES[args.algo]
+    _FRAME_SOURCE_LOGGED["done"] = False  # re-log la fuente de frame en esta invocación
 
     # model-first: cargar el modelo sobre un env sintético y luego set_env(real).
     placeholder = DummyVecEnv([lambda: _PlaceholderEnv(

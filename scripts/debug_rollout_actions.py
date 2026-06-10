@@ -98,7 +98,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "--constant-action.")
     p.add_argument("--map", default="Duckietown-loop_empty-v0")
     p.add_argument("--action-mode", default="safe_discrete",
-                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"])
+                   choices=["wheels", "wheels_fixed", "v_omega", "v_omega_safe",
+                            "safe_discrete"])
     p.add_argument("--reset-mode", default="default", choices=["default", "centerline"])
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--seed", type=int, default=42)
