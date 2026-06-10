@@ -42,12 +42,14 @@ STAGES = {
     # Rama experimental movement-reward-fix: PPO con el reward shaping de movimiento
     # del DuckieWrapper (premia desplazamiento real, penaliza quedarse parado). Mapa
     # por defecto loop_empty; single-map (model-first OK). NO sustituye a ppo20k.
+    # min_forward_speed: fuerza avance mínimo (>0) para garantizar movimiento real y
+    # evitar la política degenerada "parado" (velocidad clipada a 0).
     # eval_disable_shaping: el modelo se ENTRENA con shaping, pero se EVALÚA con la
     # recompensa LIMPIA del simulador (comparable con ppo20k y resultados previos).
     "ppo_move20k": dict(algo="ppo", timesteps=20_000, output="ppo_movement_20k",
-                        eval_disable_shaping=True),
+                        min_forward_speed=0.1, eval_disable_shaping=True),
     "ppo_move50k": dict(algo="ppo", timesteps=50_000, output="ppo_movement_50k",
-                        eval_disable_shaping=True),
+                        min_forward_speed=0.1, eval_disable_shaping=True),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
@@ -133,6 +135,8 @@ def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
         cmd += f' --init-model {stage["init_model"]}'
         if stage.get("learning_rate_override") is not None:
             cmd += f' --learning-rate-override {stage["learning_rate_override"]}'
+    if stage.get("min_forward_speed"):  # fuerza avance mínimo (p. ej. ppo_move*)
+        cmd += f' --min-forward-speed {stage["min_forward_speed"]}'
     return cmd
 
 

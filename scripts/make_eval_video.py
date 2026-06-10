@@ -69,8 +69,11 @@ class _PlaceholderEnv(gym.Env):
         if discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
+            # Debe coincidir con DuckieWrapper: velocidad [0,1], giro [-1,1].
             self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+                low=np.array([0.0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32)
         self.max_steps = max_steps
         self._n = 0
 
@@ -110,6 +113,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--disable-movement-shaping", action="store_true",
                    help="Graba con la recompensa LIMPIA del simulador (sin el reward "
                         "shaping de movimiento del DuckieWrapper).")
+    p.add_argument("--min-forward-speed", type=float, default=0.0,
+                   help="Velocidad mínima de avance forzada (0 = sin forzar). >0 (p. ej. "
+                        "0.1) permite grabar conducción real con la misma restricción "
+                        "usada en entrenamiento.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -160,7 +167,8 @@ def make_video(args: argparse.Namespace) -> dict:
     vec_env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
-                            enable_movement_shaping=not args.disable_movement_shaping)
+                            enable_movement_shaping=not args.disable_movement_shaping,
+                            min_forward_speed=args.min_forward_speed)
     model.set_env(vec_env)
     placeholder.close()
 

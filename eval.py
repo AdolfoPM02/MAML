@@ -55,8 +55,11 @@ class _PlaceholderEnv(gym.Env):
     placeholder ANTES de crear Duckietown, y luego se hace `set_env(real)`.
 
     obs    = Box(0, 255, (n_stack, 64, 64), uint8)
-    action = Discrete(len(DISCRETE_ACTIONS))    si discrete (DQN)
-             Box(-1, 1, (2,), float32)          si continuo (PPO/SAC)
+    action = Discrete(len(DISCRETE_ACTIONS))            si discrete (DQN)
+             Box([0,-1], [1,1], (2,), float32)          si continuo (PPO/SAC)
+
+    El espacio continuo coincide con DuckieWrapper (velocidad en [0,1], giro en
+    [-1,1]); imprescindible para que set_env(real) no falle por espacios distintos.
     """
 
     metadata = {"render_modes": []}
@@ -69,7 +72,9 @@ class _PlaceholderEnv(gym.Env):
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
             self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+                low=np.array([0.0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32)
         self.max_steps = max_steps
         self._n = 0
 
@@ -105,6 +110,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Evalúa con la recompensa LIMPIA del simulador (sin el reward "
                         "shaping de movimiento del DuckieWrapper). Útil para comparar de "
                         "forma justa modelos entrenados con y sin shaping.")
+    p.add_argument("--min-forward-speed", type=float, default=0.0,
+                   help="Velocidad mínima de avance forzada en el wrapper (0 = sin "
+                        "forzar). >0 (p. ej. 0.1) permite VISUALIZAR conducción real, "
+                        "pero la política queda restringida a avance positivo.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno de evaluación.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -139,7 +148,8 @@ def evaluate(args: argparse.Namespace) -> dict:
         env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
-                            enable_movement_shaping=enable_shaping)
+                            enable_movement_shaping=enable_shaping,
+                            min_forward_speed=args.min_forward_speed)
         model.set_env(env)
         placeholder.close()
     else:
@@ -148,7 +158,8 @@ def evaluate(args: argparse.Namespace) -> dict:
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack,
                             allow_eval=args.allow_eval,  # GUARD: bloquea EVAL_MAP sin allow_eval
-                            enable_movement_shaping=enable_shaping)
+                            enable_movement_shaping=enable_shaping,
+                            min_forward_speed=args.min_forward_speed)
         model = cls.load(args.model, env=env, device=args.device)
 
     rewards, lengths = evaluate_policy(

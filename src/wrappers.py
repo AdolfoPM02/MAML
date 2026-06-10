@@ -35,6 +35,7 @@ class DuckieWrapper(gym.Env):
     def __init__(self, env_name: str = config.TRAIN_MAPS[0],
                  use_mock: bool | None = None, seed: int = 0,
                  enable_movement_shaping: bool = True,
+                 min_forward_speed: float = 0.0,
                  movement_bonus: float = 5.0,
                  min_step_dist: float = 0.001,
                  still_step_penalty: float = 0.01,
@@ -44,9 +45,11 @@ class DuckieWrapper(gym.Env):
         self.env_name = env_name
         self.env = make_base_env(env_name, use_mock=use_mock, seed=seed)
 
-        # Acción CONTINUA: [velocidad, giro] en [-1, 1] (PPO / SAC / TD3).
+        # Acción CONTINUA: [velocidad, giro]. La VELOCIDAD vive en [0, 1] (no negativa:
+        # el robot no puede mandar marcha atrás, que en la práctica lo dejaba parado);
+        # el GIRO sigue en [-1, 1]. Así PPO no puede aprender a "avanzar hacia atrás".
         self.action_space = spaces.Box(
-            low=np.array([-1.0, -1.0], dtype=np.float32),
+            low=np.array([0.0, -1.0], dtype=np.float32),
             high=np.array([1.0, 1.0], dtype=np.float32),
             dtype=np.float32,
         )
@@ -63,6 +66,11 @@ class DuckieWrapper(gym.Env):
         # (comparable con resultados previos): no toca reward ni termina por quieto,
         # pero sigue rellenando info["step_dist"]/info["still_steps"] para diagnóstico.
         self._enable_movement_shaping = bool(enable_movement_shaping)
+        # Velocidad mínima de avance forzada (0 = sin forzar). Con >0, la componente de
+        # velocidad nunca baja de este valor, garantizando movimiento real durante el
+        # entrenamiento (evita la política degenerada "parado"). Es una RESTRICCIÓN de
+        # acción: una política entrenada con min_forward_speed>0 lo es bajo esa condición.
+        self._min_forward_speed = float(min_forward_speed)
         self._movement_bonus = float(movement_bonus)
         self._min_step_dist = float(min_step_dist)
         self._still_step_penalty = float(still_step_penalty)
@@ -122,8 +130,14 @@ class DuckieWrapper(gym.Env):
         return np.array([speed, steering], dtype=np.float32)
 
     def step(self, action):
-        action = self._normalize_action(action)
-        obs, reward, done, info = self.env.step(action)
+        # Acción ORIGINAL (antes de recortar), para diagnóstico.
+        raw_action = np.asarray(action, dtype=np.float32).reshape(-1)
+        # Recortar a rango válido (velocidad [0,1], giro [-1,1]) y, si procede, forzar
+        # una velocidad mínima de avance para garantizar movimiento real.
+        clipped_action = self._normalize_action(action)
+        if self._min_forward_speed > 0.0:
+            clipped_action[0] = max(float(clipped_action[0]), self._min_forward_speed)
+        obs, reward, done, info = self.env.step(clipped_action)
         reward = float(reward)
         done = bool(done)
 
@@ -155,6 +169,8 @@ class DuckieWrapper(gym.Env):
             self._last_pos = new_pos
         info["step_dist"] = step_dist
         info["still_steps"] = self._still_steps
+        info["raw_action"] = raw_action
+        info["clipped_action"] = clipped_action
 
         # gym antiguo (4-tupla) -> gymnasium (5-tupla). El entorno base solo expone
         # 'done'; lo tratamos como 'terminated' y dejamos 'truncated' a la capa de

@@ -64,8 +64,11 @@ class _PlaceholderEnv(gym.Env):
     este placeholder ANTES de crear Duckietown, y luego se hace `set_env(real)`.
 
     obs    = Box(0, 255, (n_stack, 64, 64), uint8)
-    action = Discrete(len(DISCRETE_ACTIONS))    si discrete (DQN)
-             Box(-1, 1, (2,), float32)          si continuo (PPO/SAC)
+    action = Discrete(len(DISCRETE_ACTIONS))            si discrete (DQN)
+             Box([0,-1], [1,1], (2,), float32)          si continuo (PPO/SAC)
+
+    El espacio continuo debe COINCIDIR con el de DuckieWrapper (velocidad en [0,1],
+    giro en [-1,1]); si no, set_env(real) fallaría por incompatibilidad de espacios.
     """
 
     metadata = {"render_modes": []}
@@ -78,7 +81,9 @@ class _PlaceholderEnv(gym.Env):
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
             self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+                low=np.array([0.0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32)
         self.max_steps = max_steps
         self._n = 0
 
@@ -231,6 +236,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "model-first: crea el modelo sobre un env sintético y luego "
                         "set_env(real) — evita el segfault de SB3 init con Duckietown.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
+    p.add_argument("--min-forward-speed", type=float, default=0.0,
+                   help="Velocidad mínima de avance forzada en el wrapper (0 = sin "
+                        "forzar). >0 garantiza movimiento real durante el entrenamiento "
+                        "(p. ej. 0.1); produce una política con restricción de avance.")
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     p.add_argument("--init-model", default=None,
@@ -278,7 +287,8 @@ def main(argv=None) -> None:
     print("=" * 64)
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")
     print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device} "
-          f"| init-order={args.init_order} | seed={args.seed} | init-model={args.init_model}")
+          f"| init-order={args.init_order} | seed={args.seed} | init-model={args.init_model} "
+          f"| min_forward_speed={args.min_forward_speed}")
     print("=" * 64)
 
     policy_kwargs = dict(
@@ -294,14 +304,16 @@ def main(argv=None) -> None:
         model = _build_model(spec, placeholder, args, policy_kwargs)
         print("[model-first] modelo listo sobre env sintético; creando Duckietown...")
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
-                            seed=args.seed, n_stack=args.n_stack)
+                            seed=args.seed, n_stack=args.n_stack,
+                            min_forward_speed=args.min_forward_speed)
         model.set_env(env)
         placeholder.close()
         print("[model-first] set_env(entorno real) OK")
     else:
         # env-first (default): crear el entorno real y luego el modelo.
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
-                            seed=args.seed, n_stack=args.n_stack)
+                            seed=args.seed, n_stack=args.n_stack,
+                            min_forward_speed=args.min_forward_speed)
         model = _build_model(spec, env, args, policy_kwargs)
 
     # Logger nativo SB3: stdout + CSV (sin dependencias nuevas).
