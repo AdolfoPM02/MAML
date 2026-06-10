@@ -55,21 +55,29 @@ class _PlaceholderEnv(gym.Env):
     placeholder ANTES de crear Duckietown, y luego se hace `set_env(real)`.
 
     obs    = Box(0, 255, (n_stack, 64, 64), uint8)
-    action = Discrete(len(DISCRETE_ACTIONS))    si discrete (DQN)
-             Box(-1, 1, (2,), float32)          si continuo (PPO/SAC)
+    action = Discrete(len(DISCRETE_ACTIONS))            si discrete (DQN)
+             Box([-1,-1],[1,1], (2,), float32)          si continuo "wheels"
+             Box([0,-1], [1,1], (2,), float32)          si continuo "v_omega"
+
+    El espacio continuo debe COINCIDIR con DuckieWrapper según action_mode; si no,
+    la carga del modelo fallaría por incompatibilidad de espacios.
     """
 
     metadata = {"render_modes": []}
 
-    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100):
+    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100,
+                 action_mode: str = "wheels"):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
         if discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
+            low0 = 0.0 if action_mode == "v_omega" else -1.0
             self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+                low=np.array([low0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32)
         self.max_steps = max_steps
         self._n = 0
 
@@ -110,6 +118,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "model-first: carga el modelo sobre un env sintético y luego "
                         "set_env(real) — evita el segfault de SB3 + Duckietown real.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
+    p.add_argument("--action-mode", default="wheels", choices=["wheels", "v_omega"],
+                   help="Semántica de la acción continua; debe COINCIDIR con la usada al "
+                        "entrenar el modelo. 'wheels' = [left_wheel, right_wheel]; "
+                        "'v_omega' = [v, omega] convertido a ruedas en el wrapper.")
     p.add_argument("--deterministic", dest="deterministic", action="store_true",
                    default=True, help="Política determinista (default).")
     p.add_argument("--stochastic", dest="deterministic", action="store_false",
@@ -128,11 +140,13 @@ def evaluate(args: argparse.Namespace) -> dict:
         # Cargar el modelo sobre un env SINTÉTICO (sin Duckietown) y luego set_env(real).
         # Evita el segfault de cargar/usar SB3 con Duckietown real directamente.
         placeholder = DummyVecEnv(
-            [lambda: _PlaceholderEnv(discrete, args.n_stack)])
+            [lambda: _PlaceholderEnv(discrete, args.n_stack,
+                                     action_mode=args.action_mode)])
         model = cls.load(args.model, env=placeholder, device=args.device)
         env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
-                            n_stack=args.n_stack, allow_eval=args.allow_eval)
+                            n_stack=args.n_stack, allow_eval=args.allow_eval,
+                            action_mode=args.action_mode)
         model.set_env(env)
         placeholder.close()
     else:
@@ -140,7 +154,8 @@ def evaluate(args: argparse.Namespace) -> dict:
         env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack,
-                            allow_eval=args.allow_eval)  # GUARD: bloquea EVAL_MAP sin allow_eval
+                            allow_eval=args.allow_eval,  # GUARD: bloquea EVAL_MAP sin allow_eval
+                            action_mode=args.action_mode)
         model = cls.load(args.model, env=env, device=args.device)
 
     rewards, lengths = evaluate_policy(

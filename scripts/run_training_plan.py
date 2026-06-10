@@ -39,6 +39,13 @@ STAGES = {
     # Entrenamientos principales.
     "ppo20k": dict(algo="ppo", timesteps=20_000, output="ppo_loop_empty_20k"),
     "ppo50k": dict(algo="ppo", timesteps=50_000, output="ppo_baseline_50k"),
+    # Experimento ACTION MAPPING: la política produce [v, omega] y el wrapper lo convierte
+    # a velocidades de rueda (action_mode="v_omega"). Corrige el mapeo erróneo que trataba
+    # [v, giro] como ruedas. Se entrena y se evalúa con el MISMO action_mode.
+    "ppo_vomega5k":  dict(algo="ppo", timesteps=5_000,  output="ppo_vomega_5k",
+                          action_mode="v_omega"),
+    "ppo_vomega20k": dict(algo="ppo", timesteps=20_000, output="ppo_vomega_20k",
+                          action_mode="v_omega"),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
@@ -124,21 +131,27 @@ def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
         cmd += f' --init-model {stage["init_model"]}'
         if stage.get("learning_rate_override") is not None:
             cmd += f' --learning-rate-override {stage["learning_rate_override"]}'
+    if stage.get("action_mode"):  # semántica de acción (p. ej. ppo_vomega*)
+        cmd += f' --action-mode {stage["action_mode"]}'
     return cmd
 
 
 def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[str]:
+    # Evaluar con el MISMO action_mode del entrenamiento (si no, la carga fallaría
+    # por espacios distintos en v_omega).
+    am = f' --action-mode {stage["action_mode"]}' if stage.get("action_mode") else ""
     cmds = []
     for m in EVAL_MAPS:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} --map {m} '
                     f'--episodes {args.episodes} --device {args.device} '
-                    f'--init-order {args.init_order} --seed {args.seed}')
+                    f'--init-order {args.init_order} --seed {args.seed}{am}')
     if args.allow_eval_hidden:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} '
                     f'--map {config.EVAL_MAP} --episodes {args.episodes} --allow-eval '
-                    f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
+                    f'--device {args.device} --init-order {args.init_order} '
+                    f'--seed {args.seed}{am}')
     return cmds
 
 

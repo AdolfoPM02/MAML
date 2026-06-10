@@ -64,21 +64,29 @@ class _PlaceholderEnv(gym.Env):
     este placeholder ANTES de crear Duckietown, y luego se hace `set_env(real)`.
 
     obs    = Box(0, 255, (n_stack, 64, 64), uint8)
-    action = Discrete(len(DISCRETE_ACTIONS))    si discrete (DQN)
-             Box(-1, 1, (2,), float32)          si continuo (PPO/SAC)
+    action = Discrete(len(DISCRETE_ACTIONS))            si discrete (DQN)
+             Box([-1,-1],[1,1], (2,), float32)          si continuo "wheels"
+             Box([0,-1], [1,1], (2,), float32)          si continuo "v_omega"
+
+    El espacio continuo DEBE coincidir con el de DuckieWrapper según action_mode; si no,
+    set_env(real) fallaría por incompatibilidad de espacios.
     """
 
     metadata = {"render_modes": []}
 
-    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100):
+    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100,
+                 action_mode: str = "wheels"):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
         if discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
+            low0 = 0.0 if action_mode == "v_omega" else -1.0
             self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+                low=np.array([low0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32)
         self.max_steps = max_steps
         self._n = 0
 
@@ -231,6 +239,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "model-first: crea el modelo sobre un env sintético y luego "
                         "set_env(real) — evita el segfault de SB3 init con Duckietown.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
+    p.add_argument("--action-mode", default="wheels", choices=["wheels", "v_omega"],
+                   help="Semántica de la acción continua: 'wheels' (default) = la política "
+                        "produce [left_wheel, right_wheel]; 'v_omega' = produce [v, omega] "
+                        "y el wrapper lo convierte a ruedas (left=v-omega, right=v+omega).")
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     p.add_argument("--init-model", default=None,
@@ -278,7 +290,8 @@ def main(argv=None) -> None:
     print("=" * 64)
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")
     print(f"       | mock={args.use_mock} | smoke={args.smoke} | device={args.device} "
-          f"| init-order={args.init_order} | seed={args.seed} | init-model={args.init_model}")
+          f"| init-order={args.init_order} | seed={args.seed} | init-model={args.init_model} "
+          f"| action_mode={args.action_mode}")
     print("=" * 64)
 
     policy_kwargs = dict(
@@ -290,18 +303,21 @@ def main(argv=None) -> None:
         # Construir el modelo SB3 sobre un env SINTÉTICO (sin Duckietown) y luego
         # set_env(real). Evita el segfault de inicializar PPO/torch con Duckietown.
         placeholder = DummyVecEnv(
-            [lambda: _PlaceholderEnv(spec["discrete"], args.n_stack)])
+            [lambda: _PlaceholderEnv(spec["discrete"], args.n_stack,
+                                     action_mode=args.action_mode)])
         model = _build_model(spec, placeholder, args, policy_kwargs)
         print("[model-first] modelo listo sobre env sintético; creando Duckietown...")
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
-                            seed=args.seed, n_stack=args.n_stack)
+                            seed=args.seed, n_stack=args.n_stack,
+                            action_mode=args.action_mode)
         model.set_env(env)
         placeholder.close()
         print("[model-first] set_env(entorno real) OK")
     else:
         # env-first (default): crear el entorno real y luego el modelo.
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
-                            seed=args.seed, n_stack=args.n_stack)
+                            seed=args.seed, n_stack=args.n_stack,
+                            action_mode=args.action_mode)
         model = _build_model(spec, env, args, policy_kwargs)
 
     # Logger nativo SB3: stdout + CSV (sin dependencias nuevas).

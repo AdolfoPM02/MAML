@@ -62,15 +62,20 @@ class _PlaceholderEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100):
+    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100,
+                 action_mode: str = "wheels"):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
         if discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
+            # Debe coincidir con DuckieWrapper según action_mode.
+            low0 = 0.0 if action_mode == "v_omega" else -1.0
             self.action_space = spaces.Box(
-                low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+                low=np.array([low0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32)
         self.max_steps = max_steps
         self._n = 0
 
@@ -107,6 +112,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Forzar entorno mock (sin Duckietown; produce ruido, solo prueba).")
     p.add_argument("--allow-eval", action="store_true",
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN.")
+    p.add_argument("--action-mode", default="wheels", choices=["wheels", "v_omega"],
+                   help="Semántica de la acción continua; debe COINCIDIR con la usada al "
+                        "entrenar el modelo. 'wheels' = [left_wheel, right_wheel]; "
+                        "'v_omega' = [v, omega] convertido a ruedas en el wrapper.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -152,11 +161,13 @@ def make_video(args: argparse.Namespace) -> dict:
     cls = ALGO_CLASSES[args.algo]
 
     # model-first: cargar el modelo sobre un env sintético y luego set_env(real).
-    placeholder = DummyVecEnv([lambda: _PlaceholderEnv(discrete, args.n_stack)])
+    placeholder = DummyVecEnv([lambda: _PlaceholderEnv(
+        discrete, args.n_stack, action_mode=args.action_mode)])
     model = cls.load(args.model, env=placeholder, device=args.device)
     vec_env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
-                            n_stack=args.n_stack, allow_eval=args.allow_eval)
+                            n_stack=args.n_stack, allow_eval=args.allow_eval,
+                            action_mode=args.action_mode)
     model.set_env(vec_env)
     placeholder.close()
 
