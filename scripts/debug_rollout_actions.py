@@ -117,7 +117,25 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "0..4). Sirve para medir el reward de ir recto/girar fijo.")
     p.add_argument("--print-every", type=int, default=1,
                    help="Imprimir detalle cada N pasos (default 1 = todos).")
+    p.add_argument("--action-transform", default="identity",
+                   choices=["identity", "negate", "swap", "swap_negate"],
+                   help="SOLO DIAGNÓSTICO (acciones continuas wheels/v_omega/v_omega_safe): "
+                        "transforma la acción ANTES de env.step para probar convenciones "
+                        "de rueda. identity=[l,r]; negate=[-l,-r]; swap=[r,l]; "
+                        "swap_negate=[-r,-l]. En safe_discrete solo se permite identity.")
     return p.parse_args(argv)
+
+
+def _transform_action(act: np.ndarray, transform: str) -> np.ndarray:
+    """Aplica una transformación a una acción CONTINUA batched (1, 2). Devuelve (1, 2)."""
+    a = np.asarray(act[0], dtype=np.float32).reshape(-1)
+    if transform == "negate":
+        a = -a
+    elif transform == "swap":
+        a = a[::-1].copy()
+    elif transform == "swap_negate":
+        a = (-a[::-1]).copy()
+    return np.array([a], dtype=np.float32)
 
 
 def _base_env(vec_env):
@@ -143,6 +161,11 @@ def main(argv=None) -> None:
     if args.constant_action is not None and args.action_mode != "safe_discrete":
         print("[WARN] --constant-action está pensado para safe_discrete; "
               f"action_mode={args.action_mode}.")
+    if args.action_transform != "identity" and args.action_mode == "safe_discrete":
+        raise SystemExit(
+            f"--action-transform={args.action_transform} no aplica a safe_discrete "
+            f"(acción discreta). Usa identity, o un action_mode continuo "
+            f"(wheels/v_omega/v_omega_safe).")
 
     print("=" * 72)
     mode = ("RANDOM" if args.random_policy else
@@ -151,7 +174,8 @@ def main(argv=None) -> None:
     print(f"DEBUG ROLLOUT | {mode} | map={args.map} | action_mode={args.action_mode} | "
           f"reset_mode={args.reset_mode}")
     print(f"             | steps={args.steps} | mock={args.use_mock} | "
-          f"deterministic={args.deterministic} | seed={args.seed}")
+          f"deterministic={args.deterministic} | seed={args.seed} | "
+          f"action_transform={args.action_transform}")
     print("=" * 72)
 
     # Construcción del entorno IDÉNTICA a eval.py / make_eval_video.py.
@@ -186,6 +210,14 @@ def main(argv=None) -> None:
         else:
             act, _ = model.predict(obs, deterministic=args.deterministic)
 
+        # Acción ANTES de transformar (la que produce el modelo/random/constant).
+        raw_before = np.asarray(act[0]).reshape(-1)
+        is_discrete = args.action_mode == "safe_discrete"
+        # Transformación de diagnóstico (solo acciones continuas; en discreto se bloquea).
+        if not is_discrete and args.action_transform != "identity":
+            act = _transform_action(act, args.action_transform)
+        action_after = np.asarray(act[0]).reshape(-1)
+
         obs, rewards, dones, infos = env.step(act)
         info = infos[0] if infos else {}
         reward = float(rewards[0])
@@ -193,13 +225,11 @@ def main(argv=None) -> None:
         total_reward += reward
         frames += 1
 
-        env_action = act[0]  # acción que recibió el wrapper (int o vector)
-        # Para el histograma: id discreto si existe, si no la tupla redondeada.
+        # Para el histograma: id discreto si existe, si no la tupla (post-transform) enviada.
         if "discrete_action_id" in info:
             actions_taken.append(int(info["discrete_action_id"]))
         else:
-            arr = np.asarray(env_action).reshape(-1)
-            actions_taken.append(tuple(round(float(x), 3) for x in arr))
+            actions_taken.append(tuple(round(float(x), 3) for x in action_after))
 
         if step % args.print_every == 0:
             pos, ang = _pose(base)
@@ -208,7 +238,9 @@ def main(argv=None) -> None:
                                                   for x in np.asarray(mapped).reshape(-1)]
             extra = {k: info[k] for k in ("terminated_still", "discrete_action_id")
                      if k in info}
-            print(f"[{step:4d}] obs={tuple(obs.shape)} raw={np.asarray(env_action).reshape(-1).tolist()} "
+            print(f"[{step:4d}] obs={tuple(obs.shape)} "
+                  f"raw_before={[round(float(x), 4) for x in raw_before]} "
+                  f"after={[round(float(x), 4) for x in action_after]} "
                   f"mapped={mapped} mode={info.get('action_mode')} r={reward:.3f} done={done} "
                   f"pos={pos} angle={ang} {extra if extra else ''}")
         if done:
