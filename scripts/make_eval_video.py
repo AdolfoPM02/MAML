@@ -112,10 +112,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Forzar entorno mock (sin Duckietown; produce ruido, solo prueba).")
     p.add_argument("--allow-eval", action="store_true",
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN.")
-    p.add_argument("--action-mode", default="wheels", choices=["wheels", "v_omega"],
+    p.add_argument("--action-mode", default="wheels",
+                   choices=["wheels", "v_omega", "v_omega_safe"],
                    help="Semántica de la acción continua; debe COINCIDIR con la usada al "
                         "entrenar el modelo. 'wheels' = [left_wheel, right_wheel]; "
-                        "'v_omega' = [v, omega] convertido a ruedas en el wrapper.")
+                        "'v_omega' = [v, omega] convertido a ruedas; 'v_omega_safe' = "
+                        "v_omega con v/omega acotados.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])

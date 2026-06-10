@@ -256,10 +256,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "model-first: crea el modelo sobre un env sintético y luego "
                         "set_env(real) — evita el segfault de SB3 init con Duckietown.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
-    p.add_argument("--action-mode", default="wheels", choices=["wheels", "v_omega"],
+    p.add_argument("--action-mode", default="wheels",
+                   choices=["wheels", "v_omega", "v_omega_safe"],
                    help="Semántica de la acción continua: 'wheels' (default) = la política "
                         "produce [left_wheel, right_wheel]; 'v_omega' = produce [v, omega] "
-                        "y el wrapper lo convierte a ruedas (left=v-omega, right=v+omega).")
+                        "y el wrapper lo convierte a ruedas (left=v-omega, right=v+omega); "
+                        "'v_omega_safe' = igual pero con v y omega acotados/suaves.")
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     p.add_argument("--init-model", default=None,

@@ -79,6 +79,14 @@ STAGES = {
         algo="ppo", timesteps=10_000, output="ppo_vomega_loop_ft_10k",
         map="Duckietown-loop_empty-v0", action_mode="v_omega",
         init_model="models/ppo_vomega_straight_20k", learning_rate_override=5e-5),
+    # SAFE: v_omega ACOTADO (v∈[0.10,0.25], omega≤0.30) para evitar acciones bruscas que
+    # sacaban al robot de la pista al instante. Entrena directo en loop_empty.
+    "ppo_vomega_safe_loop5k": dict(
+        algo="ppo", timesteps=5_000, output="ppo_vomega_safe_loop_5k",
+        map="Duckietown-loop_empty-v0", action_mode="v_omega_safe"),
+    "ppo_vomega_safe_loop20k": dict(
+        algo="ppo", timesteps=20_000, output="ppo_vomega_safe_loop_20k",
+        map="Duckietown-loop_empty-v0", action_mode="v_omega_safe"),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,

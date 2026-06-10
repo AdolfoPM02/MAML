@@ -118,10 +118,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "model-first: carga el modelo sobre un env sintético y luego "
                         "set_env(real) — evita el segfault de SB3 + Duckietown real.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
-    p.add_argument("--action-mode", default="wheels", choices=["wheels", "v_omega"],
+    p.add_argument("--action-mode", default="wheels",
+                   choices=["wheels", "v_omega", "v_omega_safe"],
                    help="Semántica de la acción continua; debe COINCIDIR con la usada al "
                         "entrenar el modelo. 'wheels' = [left_wheel, right_wheel]; "
-                        "'v_omega' = [v, omega] convertido a ruedas en el wrapper.")
+                        "'v_omega' = [v, omega] convertido a ruedas; 'v_omega_safe' = "
+                        "v_omega con v/omega acotados.")
     p.add_argument("--deterministic", dest="deterministic", action="store_true",
                    default=True, help="Política determinista (default).")
     p.add_argument("--stochastic", dest="deterministic", action="store_false",

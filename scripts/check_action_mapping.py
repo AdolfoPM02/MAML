@@ -42,6 +42,10 @@ DEFAULT_CASES = [
     ("v_omega", [0.2, 0.2], "girar"),
     ("wheels",  [0.2, 0.2], "avanzar recto"),
     ("wheels",  [0.1, 0.3], "girar"),
+    ("v_omega_safe", [-1.0, 0.0], "avanzar lento recto (v=v_min)"),
+    ("v_omega_safe", [1.0, 0.0],  "avanzar algo más rápido recto (v=v_max)"),
+    ("v_omega_safe", [0.0, 1.0],  "girar suave a un lado"),
+    ("v_omega_safe", [0.0, -1.0], "girar suave al otro lado"),
 ]
 
 
@@ -97,9 +101,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Forzar mock (sin Duckietown; el mock ignora la acción).")
     p.add_argument("--steps", type=int, default=30,
                    help="Pasos por caso con la acción fija (default 30).")
-    p.add_argument("--action-mode", default=None, choices=["wheels", "v_omega"],
+    p.add_argument("--action-mode", default=None,
+                   choices=["wheels", "v_omega", "v_omega_safe"],
                    help="Si se indica, solo se prueban los casos de ese modo; si se omite, "
-                        "se prueban todos los casos por defecto (ambos modos).")
+                        "se prueban todos los casos por defecto (los tres modos).")
     return p.parse_args(argv)
 
 

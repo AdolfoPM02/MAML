@@ -51,10 +51,21 @@ class DuckieWrapper(gym.Env):
         #   - "v_omega" : la política produce [v, omega] (avance, giro); el wrapper lo
         #                 convierte a ruedas  left = v - omega, right = v + omega.
         #                 action_space = Box([0,-1], [1,1]) (avance no negativo).
-        if action_mode not in ("wheels", "v_omega"):
+        #   - "v_omega_safe" : como v_omega pero ACOTADO/SUAVE. La política da
+        #                 [a_speed, a_turn] en [-1,1]; se mapea a una velocidad en un
+        #                 rango pequeño [v_min, v_max] y un giro limitado a omega_max,
+        #                 evitando acciones iniciales bruscas (v_omega salía de pista al
+        #                 instante). action_space = Box([-1,-1], [1,1]).
+        if action_mode not in ("wheels", "v_omega", "v_omega_safe"):
             raise ValueError(
-                f"action_mode debe ser 'wheels' o 'v_omega'; recibido {action_mode!r}.")
+                f"action_mode debe ser 'wheels', 'v_omega' o 'v_omega_safe'; "
+                f"recibido {action_mode!r}.")
         self._action_mode = action_mode
+
+        # Parámetros del modo seguro (suaves a propósito).
+        self._v_min = 0.10
+        self._v_max = 0.25
+        self._omega_max = 0.30
 
         if action_mode == "v_omega":
             self.action_space = spaces.Box(
@@ -62,7 +73,7 @@ class DuckieWrapper(gym.Env):
                 high=np.array([1.0, 1.0], dtype=np.float32),
                 dtype=np.float32,
             )
-        else:  # "wheels" (default conservador: igual que el action_space histórico)
+        else:  # "wheels" y "v_omega_safe": ambos Box([-1,-1], [1,1])
             self.action_space = spaces.Box(
                 low=np.array([-1.0, -1.0], dtype=np.float32),
                 high=np.array([1.0, 1.0], dtype=np.float32),
@@ -90,15 +101,19 @@ class DuckieWrapper(gym.Env):
         obs = self.env.reset()
         return self._process_obs(obs), {}
 
-    def _map_action(self, action) -> tuple[np.ndarray, np.ndarray]:
+    def _map_action(self, action) -> tuple[np.ndarray, np.ndarray, dict]:
         """Aplana/valida la acción y la mapea a velocidades de rueda [left, right].
 
         SB3 / DummyVecEnv puede entregar la acción con una dimensión extra (p. ej.
         (1, 2) en vez de (2,)); aplanamos y exigimos exactamente 2 escalares. Devuelve
-        (raw_action, mapped_action), ambos vectores (2,) float32:
-          - "wheels"  : mapped = [clip(a0,-1,1), clip(a1,-1,1)]  (ya son ruedas).
-          - "v_omega" : v=clip(a0,0,1), omega=clip(a1,-1,1);
-                        left=clip(v-omega,-1,1), right=clip(v+omega,-1,1).
+        (raw_action, mapped_action, extra), con raw/mapped vectores (2,) float32 y extra
+        un dict opcional (v, omega) para diagnóstico:
+          - "wheels"       : mapped = [clip(a0,-1,1), clip(a1,-1,1)]  (ya son ruedas).
+          - "v_omega"      : v=clip(a0,0,1), omega=clip(a1,-1,1);
+                             left=clip(v-omega,-1,1), right=clip(v+omega,-1,1).
+          - "v_omega_safe" : a_speed,a_turn=clip(a,-1,1);
+                             v = v_min + (a_speed+1)/2 * (v_max-v_min);  omega = omega_max*a_turn;
+                             left=clip(v-omega,-1,1), right=clip(v+omega,-1,1).
         """
         raw = np.asarray(action, dtype=np.float32).reshape(-1)
         if raw.shape[0] != 2:
@@ -106,24 +121,34 @@ class DuckieWrapper(gym.Env):
                 f"La acción de Duckietown debe tener 2 valores; recibido shape "
                 f"{np.asarray(action).shape} -> {raw.shape}"
             )
+        extra: dict = {}
         if self._action_mode == "v_omega":
             v = float(np.clip(raw[0], 0.0, 1.0))
             omega = float(np.clip(raw[1], -1.0, 1.0))
             left = float(np.clip(v - omega, -1.0, 1.0))
             right = float(np.clip(v + omega, -1.0, 1.0))
+        elif self._action_mode == "v_omega_safe":
+            a_speed = float(np.clip(raw[0], -1.0, 1.0))
+            a_turn = float(np.clip(raw[1], -1.0, 1.0))
+            v = self._v_min + ((a_speed + 1.0) / 2.0) * (self._v_max - self._v_min)
+            omega = self._omega_max * a_turn
+            left = float(np.clip(v - omega, -1.0, 1.0))
+            right = float(np.clip(v + omega, -1.0, 1.0))
+            extra = {"v": float(v), "omega": float(omega)}
         else:  # "wheels"
             left = float(np.clip(raw[0], -1.0, 1.0))
             right = float(np.clip(raw[1], -1.0, 1.0))
         mapped = np.array([left, right], dtype=np.float32)
-        return raw, mapped
+        return raw, mapped, extra
 
     def step(self, action):
-        raw_action, mapped_action = self._map_action(action)
+        raw_action, mapped_action, extra = self._map_action(action)
         # El simulador recibe SIEMPRE velocidades de rueda [left, right].
         obs, reward, done, info = self.env.step(mapped_action)
         info["raw_action"] = raw_action
         info["mapped_action"] = mapped_action
         info["action_mode"] = self._action_mode
+        info.update(extra)  # v / omega cuando aplica (v_omega_safe)
         # gym antiguo (4-tupla) -> gymnasium (5-tupla). El entorno base solo expone
         # 'done'; lo tratamos como 'terminated' y dejamos 'truncated' a la capa de
         # TimeLimit de SB3 si se usara. (En real Duckietown 'done' agrupa ambos.)
