@@ -46,6 +46,11 @@ DEFAULT_CASES = [
     ("v_omega_safe", [1.0, 0.0],  "avanzar algo más rápido recto (v=v_max)"),
     ("v_omega_safe", [0.0, 1.0],  "girar suave a un lado"),
     ("v_omega_safe", [0.0, -1.0], "girar suave al otro lado"),
+    ("safe_discrete", 0, "recto lento [0.18, 0.18]"),
+    ("safe_discrete", 1, "izquierda suave [0.12, 0.20]"),
+    ("safe_discrete", 2, "derecha suave [0.20, 0.12]"),
+    ("safe_discrete", 3, "izquierda media [0.08, 0.22]"),
+    ("safe_discrete", 4, "derecha media [0.22, 0.08]"),
 ]
 
 
@@ -67,25 +72,27 @@ def run_case(action_mode: str, action, expectation: str, map_name: str,
                         action_mode=action_mode)
     env.reset()
     pos0 = _get_pos(env)
-    mapped = None
+    last_info: dict = {}
     for _ in range(steps):
-        _, _, terminated, truncated, info = env.step(action)
-        mapped = info.get("mapped_action")
+        _, _, terminated, truncated, last_info = env.step(action)
         if terminated or truncated:
             break
     pos1 = _get_pos(env)
     env.close()
 
+    mapped = last_info.get("mapped_action")
     if pos0 is not None and pos1 is not None:
         dist = float(np.linalg.norm(pos1 - pos0))
     else:
         dist = None
     return {
-        "action_mode": action_mode,
+        "action_mode": last_info.get("action_mode", action_mode),
         "action": [round(float(x), 4) for x in np.asarray(action).reshape(-1)],
         "expectation": expectation,
+        "raw_action": last_info.get("raw_action"),
         "mapped_action": None if mapped is None else
             [round(float(x), 4) for x in np.asarray(mapped).reshape(-1)],
+        "discrete_action_id": last_info.get("discrete_action_id"),
         "pos0": None if pos0 is None else [round(float(x), 4) for x in pos0],
         "pos1": None if pos1 is None else [round(float(x), 4) for x in pos1],
         "distance": dist,
@@ -102,9 +109,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--steps", type=int, default=30,
                    help="Pasos por caso con la acción fija (default 30).")
     p.add_argument("--action-mode", default=None,
-                   choices=["wheels", "v_omega", "v_omega_safe"],
+                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"],
                    help="Si se indica, solo se prueban los casos de ese modo; si se omite, "
-                        "se prueban todos los casos por defecto (los tres modos).")
+                        "se prueban todos los casos por defecto (los cuatro modos).")
     return p.parse_args(argv)
 
 
@@ -120,9 +127,12 @@ def main(argv=None) -> None:
     print("=" * 72)
     for mode, action, expectation in cases:
         r = run_case(mode, action, expectation, args.map, args.use_mock, args.steps)
-        print(f"[{mode:8}] accion={r['action']} -> ruedas(mapped)={r['mapped_action']} "
-              f"| esperado: {expectation}")
-        print(f"           pos0={r['pos0']} pos1={r['pos1']} | distancia="
+        did = r["discrete_action_id"]
+        did_txt = "" if did is None else f" | discrete_action_id={did}"
+        print(f"[{r['action_mode']:13}] raw_action={r['action']} -> "
+              f"mapped_action={r['mapped_action']}{did_txt} | esperado: {expectation}")
+        print(f"           action_mode={r['action_mode']} | pos0={r['pos0']} pos1={r['pos1']} "
+              f"| distancia="
               f"{'N/A (sin cur_pos)' if r['distance'] is None else round(r['distance'], 4)}")
     print("=" * 72)
     if args.use_mock:

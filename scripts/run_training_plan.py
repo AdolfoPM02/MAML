@@ -87,6 +87,15 @@ STAGES = {
     "ppo_vomega_safe_loop20k": dict(
         algo="ppo", timesteps=20_000, output="ppo_vomega_safe_loop_20k",
         map="Duckietown-loop_empty-v0", action_mode="v_omega_safe"),
+    # SAFE_DISCRETE: PPO con acción Discrete(5) (maniobras seguras predefinidas). PPO
+    # continuo (incluso acotado) no aprendía conducción estable; discretizar el control
+    # reduce la dificultad. Entrena directo en loop_empty.
+    "ppo_safe_discrete_loop5k": dict(
+        algo="ppo", timesteps=5_000, output="ppo_safe_discrete_loop_5k",
+        map="Duckietown-loop_empty-v0", action_mode="safe_discrete"),
+    "ppo_safe_discrete_loop20k": dict(
+        algo="ppo", timesteps=20_000, output="ppo_safe_discrete_loop_20k",
+        map="Duckietown-loop_empty-v0", action_mode="safe_discrete"),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,

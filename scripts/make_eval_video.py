@@ -40,6 +40,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from src import config
 from src.envs import build_vec_env
+from src.wrappers import SAFE_DISCRETE_ACTIONS
 
 # ppo_adv / ppo_adv_v2 (Fase 3) cargan con la clase PPO (PPO con hiperparámetros avanzados).
 ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "ppo_adv_v2": PPO, "sac": SAC}
@@ -67,7 +68,9 @@ class _PlaceholderEnv(gym.Env):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
-        if discrete:
+        if action_mode == "safe_discrete":
+            self.action_space = spaces.Discrete(len(SAFE_DISCRETE_ACTIONS))
+        elif discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
             # Debe coincidir con DuckieWrapper según action_mode.
@@ -113,11 +116,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--allow-eval", action="store_true",
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN.")
     p.add_argument("--action-mode", default="wheels",
-                   choices=["wheels", "v_omega", "v_omega_safe"],
-                   help="Semántica de la acción continua; debe COINCIDIR con la usada al "
-                        "entrenar el modelo. 'wheels' = [left_wheel, right_wheel]; "
-                        "'v_omega' = [v, omega] convertido a ruedas; 'v_omega_safe' = "
-                        "v_omega con v/omega acotados.")
+                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"],
+                   help="Semántica de la acción; debe COINCIDIR con la usada al entrenar. "
+                        "'wheels' = [left_wheel, right_wheel]; 'v_omega' = [v, omega] -> "
+                        "ruedas; 'v_omega_safe' = v_omega acotado; 'safe_discrete' = "
+                        "Discrete(5) de maniobras seguras.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])

@@ -22,6 +22,17 @@ from gymnasium import spaces
 from . import config
 from .duckie_factory import make_base_env
 
+# Acciones DISCRETAS SEGURAS (velocidades de rueda [left, right]) para action_mode
+# "safe_discrete": PPO elige un entero 0..4 y el wrapper lo traduce a estas ruedas.
+# Suaves a propósito (PPO continuo no aprendía conducción estable ni siquiera acotado).
+SAFE_DISCRETE_ACTIONS: list[list[float]] = [
+    [0.18, 0.18],  # 0: recto lento
+    [0.12, 0.20],  # 1: izquierda suave
+    [0.20, 0.12],  # 2: derecha suave
+    [0.08, 0.22],  # 3: izquierda media
+    [0.22, 0.08],  # 4: derecha media
+]
+
 
 class DuckieWrapper(gym.Env):
     """Adapta Duckietown (real o mock) a Gymnasium con observación (1, 64, 64).
@@ -56,18 +67,24 @@ class DuckieWrapper(gym.Env):
         #                 rango pequeño [v_min, v_max] y un giro limitado a omega_max,
         #                 evitando acciones iniciales bruscas (v_omega salía de pista al
         #                 instante). action_space = Box([-1,-1], [1,1]).
-        if action_mode not in ("wheels", "v_omega", "v_omega_safe"):
+        #   - "safe_discrete" : acción DISCRETA. action_space = Discrete(5); cada índice
+        #                 se traduce a velocidades de rueda de SAFE_DISCRETE_ACTIONS.
+        #                 PPO continuo no aprendía conducción estable; aquí PPO elige
+        #                 entre 5 maniobras seguras predefinidas.
+        if action_mode not in ("wheels", "v_omega", "v_omega_safe", "safe_discrete"):
             raise ValueError(
-                f"action_mode debe ser 'wheels', 'v_omega' o 'v_omega_safe'; "
-                f"recibido {action_mode!r}.")
+                f"action_mode debe ser 'wheels', 'v_omega', 'v_omega_safe' o "
+                f"'safe_discrete'; recibido {action_mode!r}.")
         self._action_mode = action_mode
 
-        # Parámetros del modo seguro (suaves a propósito).
+        # Parámetros del modo seguro continuo (suaves a propósito).
         self._v_min = 0.10
         self._v_max = 0.25
         self._omega_max = 0.30
 
-        if action_mode == "v_omega":
+        if action_mode == "safe_discrete":
+            self.action_space = spaces.Discrete(len(SAFE_DISCRETE_ACTIONS))
+        elif action_mode == "v_omega":
             self.action_space = spaces.Box(
                 low=np.array([0.0, -1.0], dtype=np.float32),
                 high=np.array([1.0, 1.0], dtype=np.float32),
@@ -114,7 +131,17 @@ class DuckieWrapper(gym.Env):
           - "v_omega_safe" : a_speed,a_turn=clip(a,-1,1);
                              v = v_min + (a_speed+1)/2 * (v_max-v_min);  omega = omega_max*a_turn;
                              left=clip(v-omega,-1,1), right=clip(v+omega,-1,1).
+          - "safe_discrete": action es un entero 0..4; mapped = SAFE_DISCRETE_ACTIONS[idx].
         """
+        if self._action_mode == "safe_discrete":
+            idx = int(np.asarray(action).reshape(-1)[0])
+            if not (0 <= idx < len(SAFE_DISCRETE_ACTIONS)):
+                raise ValueError(
+                    f"safe_discrete espera un entero 0..{len(SAFE_DISCRETE_ACTIONS) - 1}; "
+                    f"recibido {action!r}.")
+            mapped = np.asarray(SAFE_DISCRETE_ACTIONS[idx], dtype=np.float32)
+            return idx, mapped, {"discrete_action_id": idx}
+
         raw = np.asarray(action, dtype=np.float32).reshape(-1)
         if raw.shape[0] != 2:
             raise ValueError(

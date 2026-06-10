@@ -43,6 +43,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from src import config
 from src.cnn import CustomCNN
 from src.envs import build_vec_env
+from src.wrappers import SAFE_DISCRETE_ACTIONS
 
 MODELS_DIR = "models"
 DEFAULT_LOG_DIR = "logs"
@@ -79,7 +80,9 @@ class _PlaceholderEnv(gym.Env):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
-        if discrete:
+        if action_mode == "safe_discrete":
+            self.action_space = spaces.Discrete(len(SAFE_DISCRETE_ACTIONS))
+        elif discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
             low0 = 0.0 if action_mode == "v_omega" else -1.0
@@ -257,11 +260,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "set_env(real) — evita el segfault de SB3 init con Duckietown.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
     p.add_argument("--action-mode", default="wheels",
-                   choices=["wheels", "v_omega", "v_omega_safe"],
-                   help="Semántica de la acción continua: 'wheels' (default) = la política "
-                        "produce [left_wheel, right_wheel]; 'v_omega' = produce [v, omega] "
-                        "y el wrapper lo convierte a ruedas (left=v-omega, right=v+omega); "
-                        "'v_omega_safe' = igual pero con v y omega acotados/suaves.")
+                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"],
+                   help="Semántica de la acción: 'wheels' (default) = [left_wheel, "
+                        "right_wheel]; 'v_omega' = [v, omega] -> ruedas; 'v_omega_safe' = "
+                        "v_omega con v/omega acotados; 'safe_discrete' = Discrete(5) de "
+                        "maniobras seguras predefinidas (PPO discreto).")
     p.add_argument("--features-dim", type=int, default=config.FEATURES_DIM)
     p.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     p.add_argument("--init-model", default=None,

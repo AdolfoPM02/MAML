@@ -34,6 +34,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 
 from src import config
 from src.envs import build_vec_env
+from src.wrappers import SAFE_DISCRETE_ACTIONS
 
 
 def set_global_seeds(seed: int) -> None:
@@ -70,7 +71,9 @@ class _PlaceholderEnv(gym.Env):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
-        if discrete:
+        if action_mode == "safe_discrete":
+            self.action_space = spaces.Discrete(len(SAFE_DISCRETE_ACTIONS))
+        elif discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
             low0 = 0.0 if action_mode == "v_omega" else -1.0
@@ -119,11 +122,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "set_env(real) — evita el segfault de SB3 + Duckietown real.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
     p.add_argument("--action-mode", default="wheels",
-                   choices=["wheels", "v_omega", "v_omega_safe"],
-                   help="Semántica de la acción continua; debe COINCIDIR con la usada al "
-                        "entrenar el modelo. 'wheels' = [left_wheel, right_wheel]; "
-                        "'v_omega' = [v, omega] convertido a ruedas; 'v_omega_safe' = "
-                        "v_omega con v/omega acotados.")
+                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"],
+                   help="Semántica de la acción; debe COINCIDIR con la usada al entrenar. "
+                        "'wheels' = [left_wheel, right_wheel]; 'v_omega' = [v, omega] -> "
+                        "ruedas; 'v_omega_safe' = v_omega acotado; 'safe_discrete' = "
+                        "Discrete(5) de maniobras seguras.")
     p.add_argument("--deterministic", dest="deterministic", action="store_true",
                    default=True, help="Política determinista (default).")
     p.add_argument("--stochastic", dest="deterministic", action="store_false",
