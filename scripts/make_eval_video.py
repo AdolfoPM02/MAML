@@ -62,16 +62,17 @@ class _PlaceholderEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100):
+    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100,
+                 continuous_min_speed: float = 0.0):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
         if discrete:
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
-            # Debe coincidir con DuckieWrapper: velocidad [0,1], giro [-1,1].
+            # Debe coincidir con DuckieWrapper: velocidad [continuous_min_speed,1], giro [-1,1].
             self.action_space = spaces.Box(
-                low=np.array([0.0, -1.0], dtype=np.float32),
+                low=np.array([continuous_min_speed, -1.0], dtype=np.float32),
                 high=np.array([1.0, 1.0], dtype=np.float32),
                 dtype=np.float32)
         self.max_steps = max_steps
@@ -117,6 +118,9 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Velocidad mínima de avance forzada (0 = sin forzar). >0 (p. ej. "
                         "0.1) permite grabar conducción real con la misma restricción "
                         "usada en entrenamiento.")
+    p.add_argument("--continuous-min-speed", type=float, default=0.0,
+                   help="Límite INFERIOR de la velocidad en el action_space continuo "
+                        "(default 0.0). Debe COINCIDIR con el usado al entrenar el modelo.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -162,13 +166,15 @@ def make_video(args: argparse.Namespace) -> dict:
     cls = ALGO_CLASSES[args.algo]
 
     # model-first: cargar el modelo sobre un env sintético y luego set_env(real).
-    placeholder = DummyVecEnv([lambda: _PlaceholderEnv(discrete, args.n_stack)])
+    placeholder = DummyVecEnv([lambda: _PlaceholderEnv(
+        discrete, args.n_stack, continuous_min_speed=args.continuous_min_speed)])
     model = cls.load(args.model, env=placeholder, device=args.device)
     vec_env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
                             enable_movement_shaping=not args.disable_movement_shaping,
-                            min_forward_speed=args.min_forward_speed)
+                            min_forward_speed=args.min_forward_speed,
+                            continuous_min_speed=args.continuous_min_speed)
     model.set_env(vec_env)
     placeholder.close()
 

@@ -21,7 +21,8 @@ def make_env(map_name: str, discrete: bool = False,
              use_mock: bool | None = None, seed: int = 0,
              allow_eval: bool = False,
              enable_movement_shaping: bool = True,
-             min_forward_speed: float = 0.0) -> Callable[[], object]:
+             min_forward_speed: float = 0.0,
+             continuous_min_speed: float = 0.0) -> Callable[[], object]:
     """Devuelve un *thunk* que construye un entorno envuelto.
 
     discrete=True  -> DuckieWrapper + DiscreteActionWrapper (DQN).
@@ -41,7 +42,8 @@ def make_env(map_name: str, discrete: bool = False,
     def _thunk():
         env = DuckieWrapper(env_name=map_name, use_mock=use_mock, seed=seed,
                             enable_movement_shaping=enable_movement_shaping,
-                            min_forward_speed=min_forward_speed)
+                            min_forward_speed=min_forward_speed,
+                            continuous_min_speed=continuous_min_speed)
         if discrete:
             env = DiscreteActionWrapper(env)
         return env
@@ -54,13 +56,15 @@ def build_vec_env(map_names: list[str], discrete: bool = False,
                   n_stack: int = config.N_STACK,
                   allow_eval: bool = False,
                   enable_movement_shaping: bool = True,
-                  min_forward_speed: float = 0.0) -> VecFrameStack:
+                  min_forward_speed: float = 0.0,
+                  continuous_min_speed: float = 0.0) -> VecFrameStack:
     """Crea un VecEnv multi-mapa con FrameStack -> observación (4, 64, 64)."""
     thunks = [
         make_env(m, discrete=discrete, use_mock=use_mock, seed=seed + i,
                  allow_eval=allow_eval,
                  enable_movement_shaping=enable_movement_shaping,
-                 min_forward_speed=min_forward_speed)
+                 min_forward_speed=min_forward_speed,
+                 continuous_min_speed=continuous_min_speed)
         for i, m in enumerate(map_names)
     ]
     venv = DummyVecEnv(thunks)

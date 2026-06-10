@@ -36,6 +36,7 @@ class DuckieWrapper(gym.Env):
                  use_mock: bool | None = None, seed: int = 0,
                  enable_movement_shaping: bool = True,
                  min_forward_speed: float = 0.0,
+                 continuous_min_speed: float = 0.0,
                  movement_bonus: float = 5.0,
                  min_step_dist: float = 0.001,
                  still_step_penalty: float = 0.01,
@@ -45,11 +46,13 @@ class DuckieWrapper(gym.Env):
         self.env_name = env_name
         self.env = make_base_env(env_name, use_mock=use_mock, seed=seed)
 
-        # Acción CONTINUA: [velocidad, giro]. La VELOCIDAD vive en [0, 1] (no negativa:
-        # el robot no puede mandar marcha atrás, que en la práctica lo dejaba parado);
-        # el GIRO sigue en [-1, 1]. Así PPO no puede aprender a "avanzar hacia atrás".
+        # Acción CONTINUA: [velocidad, giro]. La VELOCIDAD vive en [continuous_min_speed, 1]
+        # (no negativa: marcha atrás dejaba al robot parado) y el GIRO en [-1, 1].
+        # Con continuous_min_speed>0 (p. ej. 0.1) PPO ve directamente que la velocidad
+        # MÍNIMA posible es positiva, así no puede converger a velocidad 0 (parado).
+        self._continuous_min_speed = float(continuous_min_speed)
         self.action_space = spaces.Box(
-            low=np.array([0.0, -1.0], dtype=np.float32),
+            low=np.array([self._continuous_min_speed, -1.0], dtype=np.float32),
             high=np.array([1.0, 1.0], dtype=np.float32),
             dtype=np.float32,
         )

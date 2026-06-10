@@ -50,6 +50,15 @@ STAGES = {
                         min_forward_speed=0.1, eval_disable_shaping=True),
     "ppo_move50k": dict(algo="ppo", timesteps=50_000, output="ppo_movement_50k",
                         min_forward_speed=0.1, eval_disable_shaping=True),
+    # Variante FORWARD: la velocidad MÍNIMA ya es positiva DENTRO del action_space
+    # (continuous_min_speed=0.1), así PPO aprende sobre un espacio de avance positivo
+    # (no solo por la defensa externa min_forward_speed). Se EVALÚA con el MISMO espacio.
+    "ppo_forward5k":  dict(algo="ppo", timesteps=5_000,  output="ppo_forward_5k",
+                           continuous_min_speed=0.1, min_forward_speed=0.1,
+                           eval_disable_shaping=True),
+    "ppo_forward20k": dict(algo="ppo", timesteps=20_000, output="ppo_forward_20k",
+                           continuous_min_speed=0.1, min_forward_speed=0.1,
+                           eval_disable_shaping=True),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
@@ -137,24 +146,31 @@ def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
             cmd += f' --learning-rate-override {stage["learning_rate_override"]}'
     if stage.get("min_forward_speed"):  # fuerza avance mínimo (p. ej. ppo_move*)
         cmd += f' --min-forward-speed {stage["min_forward_speed"]}'
+    if stage.get("continuous_min_speed"):  # velocidad mínima dentro del action_space (ppo_forward*)
+        cmd += f' --continuous-min-speed {stage["continuous_min_speed"]}'
     return cmd
 
 
 def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[str]:
     # Stages con shaping de movimiento (ppo_move*) se evalúan con recompensa LIMPIA.
-    clean = " --disable-movement-shaping" if stage.get("eval_disable_shaping") else ""
+    extra = " --disable-movement-shaping" if stage.get("eval_disable_shaping") else ""
+    # Stages FORWARD (continuous_min_speed): evaluar con el MISMO action_space del
+    # entrenamiento; si no, la carga fallaría por espacios distintos. No afecta a ppo_move*.
+    if stage.get("continuous_min_speed"):
+        extra += f' --continuous-min-speed {stage["continuous_min_speed"]}'
+        extra += f' --min-forward-speed {stage.get("min_forward_speed", stage["continuous_min_speed"])}'
     cmds = []
     for m in EVAL_MAPS:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} --map {m} '
                     f'--episodes {args.episodes} --device {args.device} '
-                    f'--init-order {args.init_order} --seed {args.seed}{clean}')
+                    f'--init-order {args.init_order} --seed {args.seed}{extra}')
     if args.allow_eval_hidden:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} '
                     f'--map {config.EVAL_MAP} --episodes {args.episodes} --allow-eval '
                     f'--device {args.device} --init-order {args.init_order} '
-                    f'--seed {args.seed}{clean}')
+                    f'--seed {args.seed}{extra}')
     return cmds
 
 

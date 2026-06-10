@@ -64,7 +64,8 @@ class _PlaceholderEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100):
+    def __init__(self, discrete: bool, n_stack: int, max_steps: int = 100,
+                 continuous_min_speed: float = 0.0):
         super().__init__()
         self.observation_space = spaces.Box(
             low=0, high=255, shape=(n_stack, 64, 64), dtype=np.uint8)
@@ -72,7 +73,7 @@ class _PlaceholderEnv(gym.Env):
             self.action_space = spaces.Discrete(len(config.DISCRETE_ACTIONS))
         else:
             self.action_space = spaces.Box(
-                low=np.array([0.0, -1.0], dtype=np.float32),
+                low=np.array([continuous_min_speed, -1.0], dtype=np.float32),
                 high=np.array([1.0, 1.0], dtype=np.float32),
                 dtype=np.float32)
         self.max_steps = max_steps
@@ -114,6 +115,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Velocidad mínima de avance forzada en el wrapper (0 = sin "
                         "forzar). >0 (p. ej. 0.1) permite VISUALIZAR conducción real, "
                         "pero la política queda restringida a avance positivo.")
+    p.add_argument("--continuous-min-speed", type=float, default=0.0,
+                   help="Límite INFERIOR de la velocidad en el action_space continuo "
+                        "(default 0.0). Debe COINCIDIR con el usado al entrenar el modelo "
+                        "(p. ej. 0.1) para que la carga no falle por espacios distintos.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno de evaluación.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -143,13 +148,15 @@ def evaluate(args: argparse.Namespace) -> dict:
         # Cargar el modelo sobre un env SINTÉTICO (sin Duckietown) y luego set_env(real).
         # Evita el segfault de cargar/usar SB3 con Duckietown real directamente.
         placeholder = DummyVecEnv(
-            [lambda: _PlaceholderEnv(discrete, args.n_stack)])
+            [lambda: _PlaceholderEnv(discrete, args.n_stack,
+                                     continuous_min_speed=args.continuous_min_speed)])
         model = cls.load(args.model, env=placeholder, device=args.device)
         env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
                             enable_movement_shaping=enable_shaping,
-                            min_forward_speed=args.min_forward_speed)
+                            min_forward_speed=args.min_forward_speed,
+                            continuous_min_speed=args.continuous_min_speed)
         model.set_env(env)
         placeholder.close()
     else:
@@ -159,7 +166,8 @@ def evaluate(args: argparse.Namespace) -> dict:
                             n_stack=args.n_stack,
                             allow_eval=args.allow_eval,  # GUARD: bloquea EVAL_MAP sin allow_eval
                             enable_movement_shaping=enable_shaping,
-                            min_forward_speed=args.min_forward_speed)
+                            min_forward_speed=args.min_forward_speed,
+                            continuous_min_speed=args.continuous_min_speed)
         model = cls.load(args.model, env=env, device=args.device)
 
     rewards, lengths = evaluate_policy(
