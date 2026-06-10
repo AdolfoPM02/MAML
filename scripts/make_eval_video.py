@@ -125,6 +125,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--reset-mode", default="default", choices=["default", "centerline"],
                    help="'default' = spawn aleatorio; 'centerline' = reset filtrado hasta "
                         "una pose inicial válida (drivable).")
+    p.add_argument("--video-source", default="auto",
+                   choices=["auto", "render_obs", "render"],
+                   help="Fuente del frame de vídeo. 'auto' (default): prueba render_obs() "
+                        "del simulador y luego render(). 'render_obs': SOLO render_obs() "
+                        "(la cámara RGB del robot; falla si no existe). 'render': solo las "
+                        "rutas render() (framebuffer, que en Xvfb puede salir ruidoso).")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -160,27 +166,34 @@ def _coerce_rgb(arr) -> np.ndarray:
     return np.ascontiguousarray(arr)
 
 
-def _try_render(obj):
-    """Intenta obj.render(mode='rgb_array') y, si falla, obj.render(). Devuelve un frame
-    RGB(A) válido o None."""
+def _invoke(obj, method: str, kwargs: dict):
+    """Llama obj.method(**kwargs) si existe. Devuelve un frame RGB(A) válido o None.
+
+    Importante para Duckietown: `render_obs()` devuelve la CÁMARA RGB del robot (lo que ve
+    el agente antes del preprocesado); `render()` devuelve el framebuffer de la ventana,
+    que bajo Xvfb puede salir ruidoso aunque tenga shape RGB válida."""
     if obj is None:
         return None
-    for kwargs in ({"mode": "rgb_array"}, {}):
-        try:
-            frame = obj.render(**kwargs)
-        except Exception:
-            continue
-        if frame is not None and _is_rgb(frame):
-            return frame
+    fn = getattr(obj, method, None)
+    if fn is None or not callable(fn):
+        return None
+    try:
+        frame = fn(**kwargs) if kwargs else fn()
+    except Exception:
+        return None
+    if frame is not None and _is_rgb(frame):
+        return frame
     return None
 
 
-def get_rgb_frame(vec_env, last_obs=None, log: bool = False) -> np.ndarray:
+def get_rgb_frame(vec_env, last_obs=None, log: bool = False,
+                  video_source: str = "auto") -> np.ndarray:
     """Obtiene SIEMPRE un frame RGB del SIMULADOR (no la observación del agente).
 
-    Prueba varias rutas, de la más interna (el env real de Duckietown) a la más externa,
-    quedándose con la primera que devuelva un frame RGB(A) válido. Si ninguna funciona,
-    cae a la observación SOLO como último recurso y con WARNING; si tampoco, lanza error.
+    Prioriza `render_obs()` (cámara RGB del robot) sobre `render()` (framebuffer). Con
+    video_source='render_obs' solo se prueba render_obs y se falla si no existe; con
+    'render' solo las rutas render(); 'auto' (default) prueba render_obs y luego render.
+    Último recurso (solo auto/render): la observación del agente, con WARNING.
     """
     base = None
     try:
@@ -191,21 +204,43 @@ def get_rgb_frame(vec_env, last_obs=None, log: bool = False) -> np.ndarray:
     base_unwrapped = getattr(base, "unwrapped", None)
     venv = getattr(vec_env, "venv", None)
 
-    candidates = [
-        ("venv.envs[0].env.render", base_env),
-        ("venv.envs[0].render", base),
-        ("venv.envs[0].unwrapped.render", base_unwrapped),
-        ("venv.render", venv),
-        ("render", vec_env),
+    # (nombre, objeto, método, kwargs) — render_obs primero (cámara del robot).
+    render_obs_sources = [
+        ("venv.envs[0].env.render_obs", base_env, "render_obs", {}),
+        ("venv.envs[0].unwrapped.render_obs", base_unwrapped, "render_obs", {}),
+        ("venv.envs[0].render_obs", base, "render_obs", {}),
     ]
-    for name, obj in candidates:
-        frame = _try_render(obj)
+    render_sources = [
+        ("venv.envs[0].env.render", base_env, "render", {"mode": "rgb_array"}),
+        ("venv.envs[0].env.render", base_env, "render", {}),
+        ("venv.envs[0].render", base, "render", {"mode": "rgb_array"}),
+        ("venv.envs[0].render", base, "render", {}),
+        ("venv.render", venv, "render", {"mode": "rgb_array"}),
+        ("venv.render", venv, "render", {}),
+        ("render", vec_env, "render", {"mode": "rgb_array"}),
+        ("render", vec_env, "render", {}),
+    ]
+    if video_source == "render_obs":
+        candidates = render_obs_sources
+    elif video_source == "render":
+        candidates = render_sources
+    else:  # auto
+        candidates = render_obs_sources + render_sources
+
+    for name, obj, method, kwargs in candidates:
+        frame = _invoke(obj, method, kwargs)
         if frame is not None:
             rgb = _coerce_rgb(frame)
             if log and not _FRAME_SOURCE_LOGGED["done"]:
                 print(f"  [video] frame source={name} | shape={rgb.shape} | dtype={rgb.dtype}")
                 _FRAME_SOURCE_LOGGED["done"] = True
             return rgb
+
+    # video_source='render_obs': fallar explícitamente (no caer a render ni a obs).
+    if video_source == "render_obs":
+        raise RuntimeError(
+            "--video-source render_obs: render_obs() no existe o falló en "
+            "venv.envs[0].env / unwrapped / envs[0]. Usa --video-source auto o render.")
 
     # Fallback EXPLÍCITO a la observación (no es un render real): solo para no fallar.
     if last_obs is not None:
@@ -220,22 +255,22 @@ def get_rgb_frame(vec_env, last_obs=None, log: bool = False) -> np.ndarray:
         return rgb
 
     raise RuntimeError(
-        "No se pudo obtener un frame RGB del simulador (render falló en todas las rutas: "
-        "venv.envs[0].env / envs[0] / unwrapped / venv / vec_env) y no hay observación de "
-        "respaldo.")
+        "No se pudo obtener un frame RGB del simulador (render_obs y render fallaron en "
+        "todas las rutas) y no hay observación de respaldo.")
 
 
-def _run_rollout(model, vec_env, max_steps: int, deterministic: bool):
+def _run_rollout(model, vec_env, max_steps: int, deterministic: bool,
+                 video_source: str = "auto"):
     """Corre un rollout y devuelve (frames RGB, recompensa acumulada)."""
     frames = []
     obs = vec_env.reset()
-    frames.append(get_rgb_frame(vec_env, last_obs=obs, log=True))
+    frames.append(get_rgb_frame(vec_env, last_obs=obs, log=True, video_source=video_source))
     total = 0.0
     for _ in range(max_steps):
         action, _ = model.predict(obs, deterministic=deterministic)
         obs, rewards, dones, _ = vec_env.step(action)
         total += float(rewards[0])
-        frames.append(get_rgb_frame(vec_env, last_obs=obs))
+        frames.append(get_rgb_frame(vec_env, last_obs=obs, video_source=video_source))
         if bool(dones[0]):
             break
     return frames, total
@@ -266,7 +301,8 @@ def make_video(args: argparse.Namespace) -> dict:
 
     best_frames, best_reward, best_idx = None, -np.inf, -1
     for i in range(args.rollouts):
-        frames, reward = _run_rollout(model, vec_env, args.max_steps, args.deterministic)
+        frames, reward = _run_rollout(model, vec_env, args.max_steps, args.deterministic,
+                                      video_source=args.video_source)
         print(f"  rollout {i + 1}/{args.rollouts}: reward={reward:.3f} | frames={len(frames)}")
         if reward > best_reward:
             best_frames, best_reward, best_idx = frames, reward, i
