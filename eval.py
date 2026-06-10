@@ -101,6 +101,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN, "
                         "NUNCA para entrenamiento. Sin este flag, ese mapa está "
                         "bloqueado por el guard de make_env.")
+    p.add_argument("--disable-movement-shaping", action="store_true",
+                   help="Evalúa con la recompensa LIMPIA del simulador (sin el reward "
+                        "shaping de movimiento del DuckieWrapper). Útil para comparar de "
+                        "forma justa modelos entrenados con y sin shaping.")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno de evaluación.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -124,6 +128,8 @@ def evaluate(args: argparse.Namespace) -> dict:
     discrete = args.algo == "dqn"
     cls = ALGO_CLASSES[args.algo]
 
+    enable_shaping = not args.disable_movement_shaping
+
     if args.init_order == "model-first":
         # Cargar el modelo sobre un env SINTÉTICO (sin Duckietown) y luego set_env(real).
         # Evita el segfault de cargar/usar SB3 con Duckietown real directamente.
@@ -132,7 +138,8 @@ def evaluate(args: argparse.Namespace) -> dict:
         model = cls.load(args.model, env=placeholder, device=args.device)
         env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
-                            n_stack=args.n_stack, allow_eval=args.allow_eval)
+                            n_stack=args.n_stack, allow_eval=args.allow_eval,
+                            enable_movement_shaping=enable_shaping)
         model.set_env(env)
         placeholder.close()
     else:
@@ -140,7 +147,8 @@ def evaluate(args: argparse.Namespace) -> dict:
         env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
                             n_stack=args.n_stack,
-                            allow_eval=args.allow_eval)  # GUARD: bloquea EVAL_MAP sin allow_eval
+                            allow_eval=args.allow_eval,  # GUARD: bloquea EVAL_MAP sin allow_eval
+                            enable_movement_shaping=enable_shaping)
         model = cls.load(args.model, env=env, device=args.device)
 
     rewards, lengths = evaluate_policy(

@@ -107,6 +107,9 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Forzar entorno mock (sin Duckietown; produce ruido, solo prueba).")
     p.add_argument("--allow-eval", action="store_true",
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN.")
+    p.add_argument("--disable-movement-shaping", action="store_true",
+                   help="Graba con la recompensa LIMPIA del simulador (sin el reward "
+                        "shaping de movimiento del DuckieWrapper).")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -156,7 +159,8 @@ def make_video(args: argparse.Namespace) -> dict:
     model = cls.load(args.model, env=placeholder, device=args.device)
     vec_env = build_vec_env([args.map], discrete=discrete,
                             use_mock=(args.use_mock or None), seed=args.seed,
-                            n_stack=args.n_stack, allow_eval=args.allow_eval)
+                            n_stack=args.n_stack, allow_eval=args.allow_eval,
+                            enable_movement_shaping=not args.disable_movement_shaping)
     model.set_env(vec_env)
     placeholder.close()
 

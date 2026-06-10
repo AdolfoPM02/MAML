@@ -39,6 +39,15 @@ STAGES = {
     # Entrenamientos principales.
     "ppo20k": dict(algo="ppo", timesteps=20_000, output="ppo_loop_empty_20k"),
     "ppo50k": dict(algo="ppo", timesteps=50_000, output="ppo_baseline_50k"),
+    # Rama experimental movement-reward-fix: PPO con el reward shaping de movimiento
+    # del DuckieWrapper (premia desplazamiento real, penaliza quedarse parado). Mapa
+    # por defecto loop_empty; single-map (model-first OK). NO sustituye a ppo20k.
+    # eval_disable_shaping: el modelo se ENTRENA con shaping, pero se EVALÚA con la
+    # recompensa LIMPIA del simulador (comparable con ppo20k y resultados previos).
+    "ppo_move20k": dict(algo="ppo", timesteps=20_000, output="ppo_movement_20k",
+                        eval_disable_shaping=True),
+    "ppo_move50k": dict(algo="ppo", timesteps=50_000, output="ppo_movement_50k",
+                        eval_disable_shaping=True),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
@@ -128,17 +137,20 @@ def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
 
 
 def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[str]:
+    # Stages con shaping de movimiento (ppo_move*) se evalúan con recompensa LIMPIA.
+    clean = " --disable-movement-shaping" if stage.get("eval_disable_shaping") else ""
     cmds = []
     for m in EVAL_MAPS:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} --map {m} '
                     f'--episodes {args.episodes} --device {args.device} '
-                    f'--init-order {args.init_order} --seed {args.seed}')
+                    f'--init-order {args.init_order} --seed {args.seed}{clean}')
     if args.allow_eval_hidden:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} '
                     f'--map {config.EVAL_MAP} --episodes {args.episodes} --allow-eval '
-                    f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
+                    f'--device {args.device} --init-order {args.init_order} '
+                    f'--seed {args.seed}{clean}')
     return cmds
 
 

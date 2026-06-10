@@ -33,7 +33,13 @@ class DuckieWrapper(gym.Env):
     metadata = {"render_modes": ["rgb_array"]}
 
     def __init__(self, env_name: str = config.TRAIN_MAPS[0],
-                 use_mock: bool | None = None, seed: int = 0):
+                 use_mock: bool | None = None, seed: int = 0,
+                 enable_movement_shaping: bool = True,
+                 movement_bonus: float = 5.0,
+                 min_step_dist: float = 0.001,
+                 still_step_penalty: float = 0.01,
+                 max_still_steps: int = 150,
+                 still_terminal_penalty: float = 100.0):
         super().__init__()
         self.env_name = env_name
         self.env = make_base_env(env_name, use_mock=use_mock, seed=seed)
@@ -48,6 +54,33 @@ class DuckieWrapper(gym.Env):
         self.observation_space = spaces.Box(
             low=0, high=255, shape=config.OBS_SHAPE, dtype=np.uint8
         )
+
+        # --- Reward shaping de MOVIMIENTO (rama experimental) -----------------
+        # Premiar el desplazamiento real del robot y penalizar quedarse parado.
+        # Solo se activa si el entorno base expone `cur_pos` (Duckietown real);
+        # en el MOCK (sin cur_pos) el shaping es un no-op y la recompensa no cambia.
+        # `enable_movement_shaping=False` evalúa con la recompensa LIMPIA del simulador
+        # (comparable con resultados previos): no toca reward ni termina por quieto,
+        # pero sigue rellenando info["step_dist"]/info["still_steps"] para diagnóstico.
+        self._enable_movement_shaping = bool(enable_movement_shaping)
+        self._movement_bonus = float(movement_bonus)
+        self._min_step_dist = float(min_step_dist)
+        self._still_step_penalty = float(still_step_penalty)
+        self._max_still_steps = int(max_still_steps)
+        self._still_terminal_penalty = float(still_terminal_penalty)
+        self._last_pos = None
+        self._still_steps = 0
+
+    def _get_pos(self):
+        """Posición actual del robot como vector float, o None si el entorno base no
+        expone `cur_pos` (p. ej. el mock). Nunca lanza excepción."""
+        pos = getattr(self.env, "cur_pos", None)
+        if pos is None:
+            return None
+        try:
+            return np.asarray(pos, dtype=np.float64).reshape(-1)
+        except Exception:
+            return None
 
     def _process_obs(self, obs: np.ndarray) -> np.ndarray:
         # Recortar la mitad superior (cielo), pasar a grises y redimensionar.
@@ -64,6 +97,9 @@ class DuckieWrapper(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         obs = self.env.reset()
+        # Estado del shaping de movimiento: posición inicial y contador de "parado".
+        self._last_pos = self._get_pos()
+        self._still_steps = 0
         return self._process_obs(obs), {}
 
     def _normalize_action(self, action) -> np.ndarray:
@@ -88,10 +124,42 @@ class DuckieWrapper(gym.Env):
     def step(self, action):
         action = self._normalize_action(action)
         obs, reward, done, info = self.env.step(action)
+        reward = float(reward)
+        done = bool(done)
+
+        # --- Reward shaping de MOVIMIENTO -------------------------------------
+        # Si hay posición disponible (Duckietown real), premiar el desplazamiento y
+        # penalizar quedarse parado; si se acumulan demasiados pasos sin moverse,
+        # terminar el episodio. En el mock (sin cur_pos) no se altera la recompensa.
+        new_pos = self._get_pos()
+        if new_pos is not None and self._last_pos is not None:
+            step_dist = float(np.linalg.norm(new_pos - self._last_pos))
+            # El contador de "parado" se actualiza SIEMPRE (sirve de diagnóstico
+            # también con el shaping desactivado); solo la recompensa/terminación
+            # dependen de enable_movement_shaping.
+            if step_dist < self._min_step_dist:
+                self._still_steps += 1
+            else:
+                self._still_steps = 0
+            if self._enable_movement_shaping:
+                reward += self._movement_bonus * step_dist
+                if step_dist < self._min_step_dist:
+                    reward -= self._still_step_penalty
+                if self._still_steps >= self._max_still_steps:
+                    done = True
+                    reward -= self._still_terminal_penalty
+                    info["terminated_still"] = True
+        else:
+            step_dist = None  # posición no disponible (mock): shaping desactivado
+        if new_pos is not None:
+            self._last_pos = new_pos
+        info["step_dist"] = step_dist
+        info["still_steps"] = self._still_steps
+
         # gym antiguo (4-tupla) -> gymnasium (5-tupla). El entorno base solo expone
         # 'done'; lo tratamos como 'terminated' y dejamos 'truncated' a la capa de
         # TimeLimit de SB3 si se usara. (En real Duckietown 'done' agrupa ambos.)
-        return self._process_obs(obs), float(reward), bool(done), False, info
+        return self._process_obs(obs), reward, done, False, info
 
     def render(self):
         return self.env.render(mode="rgb_array")
