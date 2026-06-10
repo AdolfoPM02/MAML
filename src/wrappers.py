@@ -126,6 +126,44 @@ class DuckieWrapper(gym.Env):
             low=0, high=255, shape=config.OBS_SHAPE, dtype=np.uint8
         )
 
+        # Último frame RGB ORIGINAL del simulador (antes de gris/resize/stack), guardado
+        # solo para generar vídeo: en Colab/Xvfb render() devuelve framebuffer basura y
+        # esta versión de gym_duckietown no tiene render_obs(), así que la fuente fiable
+        # de imagen es la propia observación cruda del entorno. NO afecta a lo que ve el
+        # agente (que sigue siendo la observación preprocesada).
+        self.last_rgb_frame = None
+
+    @staticmethod
+    def _is_rgb_frame(obs) -> bool:
+        """True si obs parece un frame RGB(A) crudo: ndarray, ndim==3, 3 o 4 canales y
+        alto/ancho razonables (>=16). Esto distingue la observación CRUDA del simulador
+        de la procesada (1,64,64)/gris."""
+        if not isinstance(obs, np.ndarray):
+            return False
+        return (obs.ndim == 3 and obs.shape[2] in (3, 4)
+                and obs.shape[0] >= 16 and obs.shape[1] >= 16)
+
+    @staticmethod
+    def _coerce_rgb_frame(obs) -> np.ndarray:
+        """Convierte un frame válido a una COPIA RGB uint8: RGBA->RGB, float[0,1]->uint8."""
+        arr = np.asarray(obs)
+        if arr.shape[2] == 4:                 # RGBA -> RGB
+            arr = arr[:, :, :3]
+        if arr.dtype != np.uint8:
+            a = arr.astype(np.float64)
+            if np.nanmax(a) <= 1.0 + 1e-6:    # floats en [0,1] -> [0,255]
+                a = a * 255.0
+            arr = np.clip(a, 0, 255).astype(np.uint8)
+        return np.ascontiguousarray(arr).copy()
+
+    def _store_rgb_frame(self, obs) -> bool:
+        """Guarda self.last_rgb_frame si obs es un frame RGB válido. Si no, mantiene el
+        último válido (no rompe). Devuelve True si se guardó uno nuevo."""
+        if self._is_rgb_frame(obs):
+            self.last_rgb_frame = self._coerce_rgb_frame(obs)
+            return True
+        return False
+
     def _process_obs(self, obs: np.ndarray) -> np.ndarray:
         # Recortar la mitad superior (cielo), pasar a grises y redimensionar.
         obs = obs[obs.shape[0] // 2:, :, :]
@@ -164,6 +202,7 @@ class DuckieWrapper(gym.Env):
                 warnings.warn(
                     f"reset_mode=centerline: sin pose válida en {self._max_reset_attempts} "
                     f"intentos ({self.env_name}); se usa la última.")
+        self._store_rgb_frame(obs)  # frame RGB crudo para vídeo (no afecta a la obs)
         return self._process_obs(obs), {}
 
     def _map_action(self, action) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -232,6 +271,8 @@ class DuckieWrapper(gym.Env):
         info["mapped_action"] = mapped_action
         info["action_mode"] = self._action_mode
         info.update(extra)  # v / omega cuando aplica (v_omega_safe)
+        if self._store_rgb_frame(obs):  # frame RGB crudo para vídeo (no afecta a la obs)
+            info["has_last_rgb_frame"] = True
         # gym antiguo (4-tupla) -> gymnasium (5-tupla). El entorno base solo expone
         # 'done'; lo tratamos como 'terminated' y dejamos 'truncated' a la capa de
         # TimeLimit de SB3 si se usara. (En real Duckietown 'done' agrupa ambos.)

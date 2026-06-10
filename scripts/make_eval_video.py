@@ -126,11 +126,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="'default' = spawn aleatorio; 'centerline' = reset filtrado hasta "
                         "una pose inicial válida (drivable).")
     p.add_argument("--video-source", default="auto",
-                   choices=["auto", "render_obs", "render"],
-                   help="Fuente del frame de vídeo. 'auto' (default): prueba render_obs() "
-                        "del simulador y luego render(). 'render_obs': SOLO render_obs() "
-                        "(la cámara RGB del robot; falla si no existe). 'render': solo las "
-                        "rutas render() (framebuffer, que en Xvfb puede salir ruidoso).")
+                   choices=["auto", "wrapper_rgb", "render_obs", "render"],
+                   help="Fuente del frame de vídeo. 'auto' (default): wrapper_rgb -> "
+                        "render_obs -> render -> obs. 'wrapper_rgb': SOLO el frame RGB crudo "
+                        "guardado por DuckieWrapper (last_rgb_frame; falla si no existe). "
+                        "'render_obs': SOLO render_obs() (falla si no existe). 'render': "
+                        "solo render() (framebuffer; en Xvfb puede salir ruidoso).")
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch y el entorno.")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
@@ -186,14 +187,35 @@ def _invoke(obj, method: str, kwargs: dict):
     return None
 
 
+def _first_frame(*specs):
+    """Prueba varias llamadas (obj, method, kwargs) y devuelve el primer frame válido
+    o None. (No se puede usar `a or b` con ndarrays: la verdad de un array es ambigua.)"""
+    for obj, method, kwargs in specs:
+        frame = _invoke(obj, method, kwargs)
+        if frame is not None:
+            return frame
+    return None
+
+
+def _attr_frame(obj, name: str):
+    """Devuelve el atributo `name` de obj si es un frame RGB(A) válido (p. ej. el
+    last_rgb_frame que guarda DuckieWrapper), o None."""
+    if obj is None:
+        return None
+    frame = getattr(obj, name, None)
+    if frame is not None and _is_rgb(frame):
+        return frame
+    return None
+
+
 def get_rgb_frame(vec_env, last_obs=None, log: bool = False,
                   video_source: str = "auto") -> np.ndarray:
-    """Obtiene SIEMPRE un frame RGB del SIMULADOR (no la observación del agente).
+    """Obtiene un frame RGB para el vídeo, SIN usar la observación preprocesada del agente.
 
-    Prioriza `render_obs()` (cámara RGB del robot) sobre `render()` (framebuffer). Con
-    video_source='render_obs' solo se prueba render_obs y se falla si no existe; con
-    'render' solo las rutas render(); 'auto' (default) prueba render_obs y luego render.
-    Último recurso (solo auto/render): la observación del agente, con WARNING.
+    Prioriza el frame RGB CRUDO guardado por DuckieWrapper (last_rgb_frame); luego
+    render_obs() (cámara del robot); luego render() (framebuffer, ruidoso en Xvfb). Con
+    video_source 'wrapper_rgb'/'render_obs'/'render' se prueba SOLO esa familia y se falla
+    si no existe. 'auto' las prueba en orden y, último recurso, cae a la observación (WARN).
     """
     base = None
     try:
@@ -204,31 +226,39 @@ def get_rgb_frame(vec_env, last_obs=None, log: bool = False,
     base_unwrapped = getattr(base, "unwrapped", None)
     venv = getattr(vec_env, "venv", None)
 
-    # (nombre, objeto, método, kwargs) — render_obs primero (cámara del robot).
+    # (nombre, thunk) — wrapper_rgb primero (frame RGB crudo del wrapper).
+    wrapper_rgb_sources = [
+        ("venv.envs[0].last_rgb_frame", lambda: _attr_frame(base, "last_rgb_frame")),
+        ("venv.envs[0].env.last_rgb_frame", lambda: _attr_frame(base_env, "last_rgb_frame")),
+        ("venv.envs[0].unwrapped.last_rgb_frame",
+         lambda: _attr_frame(base_unwrapped, "last_rgb_frame")),
+    ]
     render_obs_sources = [
-        ("venv.envs[0].env.render_obs", base_env, "render_obs", {}),
-        ("venv.envs[0].unwrapped.render_obs", base_unwrapped, "render_obs", {}),
-        ("venv.envs[0].render_obs", base, "render_obs", {}),
+        ("venv.envs[0].env.render_obs", lambda: _invoke(base_env, "render_obs", {})),
+        ("venv.envs[0].unwrapped.render_obs", lambda: _invoke(base_unwrapped, "render_obs", {})),
+        ("venv.envs[0].render_obs", lambda: _invoke(base, "render_obs", {})),
     ]
     render_sources = [
-        ("venv.envs[0].env.render", base_env, "render", {"mode": "rgb_array"}),
-        ("venv.envs[0].env.render", base_env, "render", {}),
-        ("venv.envs[0].render", base, "render", {"mode": "rgb_array"}),
-        ("venv.envs[0].render", base, "render", {}),
-        ("venv.render", venv, "render", {"mode": "rgb_array"}),
-        ("venv.render", venv, "render", {}),
-        ("render", vec_env, "render", {"mode": "rgb_array"}),
-        ("render", vec_env, "render", {}),
+        ("venv.envs[0].env.render", lambda: _first_frame(
+            (base_env, "render", {"mode": "rgb_array"}), (base_env, "render", {}))),
+        ("venv.envs[0].render", lambda: _first_frame(
+            (base, "render", {"mode": "rgb_array"}), (base, "render", {}))),
+        ("venv.render", lambda: _first_frame(
+            (venv, "render", {"mode": "rgb_array"}), (venv, "render", {}))),
+        ("render", lambda: _first_frame(
+            (vec_env, "render", {"mode": "rgb_array"}), (vec_env, "render", {}))),
     ]
-    if video_source == "render_obs":
+    if video_source == "wrapper_rgb":
+        candidates = wrapper_rgb_sources
+    elif video_source == "render_obs":
         candidates = render_obs_sources
     elif video_source == "render":
         candidates = render_sources
     else:  # auto
-        candidates = render_obs_sources + render_sources
+        candidates = wrapper_rgb_sources + render_obs_sources + render_sources
 
-    for name, obj, method, kwargs in candidates:
-        frame = _invoke(obj, method, kwargs)
+    for name, thunk in candidates:
+        frame = thunk()
         if frame is not None:
             rgb = _coerce_rgb(frame)
             if log and not _FRAME_SOURCE_LOGGED["done"]:
@@ -236,7 +266,12 @@ def get_rgb_frame(vec_env, last_obs=None, log: bool = False,
                 _FRAME_SOURCE_LOGGED["done"] = True
             return rgb
 
-    # video_source='render_obs': fallar explícitamente (no caer a render ni a obs).
+    # Modos específicos: fallar explícitamente (no caer a otra familia ni a obs).
+    if video_source == "wrapper_rgb":
+        raise RuntimeError(
+            "--video-source wrapper_rgb: last_rgb_frame no disponible en "
+            "venv.envs[0] / .env / .unwrapped (¿el DuckieWrapper no guardó frame RGB "
+            "crudo, o el env es mock?). Usa --video-source auto.")
     if video_source == "render_obs":
         raise RuntimeError(
             "--video-source render_obs: render_obs() no existe o falló en "
