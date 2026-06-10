@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 import torch
-from stable_baselines3 import DQN, PPO, SAC
+from stable_baselines3 import A2C, DQN, PPO, SAC
 import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -47,7 +47,8 @@ def set_global_seeds(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 # ppo_adv / ppo_adv_v2 (Fase 3) cargan con la clase PPO (son PPO con hiperparámetros avanzados).
-ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "ppo_adv_v2": PPO, "sac": SAC}
+ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "ppo_adv_v2": PPO,
+                "sac": SAC, "a2c": A2C}
 
 
 class _PlaceholderEnv(gym.Env):
@@ -97,7 +98,7 @@ class _PlaceholderEnv(gym.Env):
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluar un modelo Duckietown guardado.")
     p.add_argument("--algo", required=True,
-                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"],
+                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac", "a2c"],
                    help="Algoritmo del modelo (elige la clase para .load). "
                         "ppo_adv y ppo_adv_v2 usan PPO.")
     p.add_argument("--model", required=True,

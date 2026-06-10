@@ -127,6 +127,19 @@ STAGES = {
         algo="ppo", timesteps=20_000, output="ppo_safe_discrete_centerline_loop_20k",
         map="Duckietown-loop_empty-v0", action_mode="safe_discrete",
         reset_mode="centerline"),
+    # A2C (RL puro on-policy, sugerido en las diapositivas) con safe_discrete. Alternativa
+    # a PPO continuo: más simple/rápido y opera sobre el Discrete(5) de maniobras seguras.
+    "a2c_safe_discrete_loop10k": dict(
+        algo="a2c", timesteps=10_000, output="a2c_safe_discrete_loop_10k",
+        map="Duckietown-loop_empty-v0", action_mode="safe_discrete"),
+    "a2c_safe_discrete_loop50k": dict(
+        algo="a2c", timesteps=50_000, output="a2c_safe_discrete_loop_50k",
+        map="Duckietown-loop_empty-v0", action_mode="safe_discrete"),
+    "a2c_safe_discrete_straight20k": dict(
+        algo="a2c", timesteps=20_000, output="a2c_safe_discrete_straight_20k",
+        map="Duckietown-straight_road-v0", action_mode="safe_discrete",
+        eval_maps=["Duckietown-straight_road-v0", "Duckietown-loop_empty-v0",
+                   "Duckietown-small_loop-v0"]),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,

@@ -30,7 +30,7 @@ import sys
 # Permitir importar el paquete src/ ejecutando desde la raíz del proyecto.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from stable_baselines3 import DQN, PPO, SAC
+from stable_baselines3 import A2C, DQN, PPO, SAC
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.utils import get_schedule_fn
 
@@ -202,6 +202,21 @@ def get_algo_spec(algo: str, smoke: bool) -> dict:
             hp.update(buffer_size=2_000, learning_starts=100, batch_size=64)
         return dict(cls=SAC, discrete=False, hyperparams=hp)
 
+    if algo == "a2c":
+        # A2C (RL puro on-policy, sugerido en las diapositivas). Más simple/rápido que
+        # SAC/TD3. Funciona con espacio de acción Discrete (combina con safe_discrete) y
+        # continuo. discrete=False: no añade DiscreteActionWrapper; con action_mode=
+        # safe_discrete el propio DuckieWrapper ya expone Discrete(5).
+        hp = dict(
+            learning_rate=7e-4,
+            n_steps=5,
+            gamma=0.99,
+            gae_lambda=1.0,
+            ent_coef=0.0,
+            vf_coef=0.5,
+        )
+        return dict(cls=A2C, discrete=False, hyperparams=hp)
+
     raise ValueError(f"Algoritmo desconocido: {algo!r}")
 
 
@@ -238,7 +253,7 @@ def resolve_maps(map_args: list[str] | str) -> list[str]:
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Entrenar DQN/PPO/SAC en Duckietown.")
     p.add_argument("--algo", required=True,
-                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"])
+                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac", "a2c"])
     p.add_argument("--map", nargs="+", default=["all"],
                    help="Uno o VARIOS mapas de TRAIN_MAPS (multi-mapa / curriculum), o "
                         "'all' (default) para todos. Ej: --map Duckietown-straight_road-v0 "

@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import torch
-from stable_baselines3 import DQN, PPO, SAC
+from stable_baselines3 import A2C, DQN, PPO, SAC
 import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -43,7 +43,8 @@ from src.envs import build_vec_env
 from src.wrappers import SAFE_DISCRETE_ACTIONS
 
 # ppo_adv / ppo_adv_v2 (Fase 3) cargan con la clase PPO (PPO con hiperparámetros avanzados).
-ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "ppo_adv_v2": PPO, "sac": SAC}
+ALGO_CLASSES = {"dqn": DQN, "ppo": PPO, "ppo_adv": PPO, "ppo_adv_v2": PPO,
+                "sac": SAC, "a2c": A2C}
 
 
 def set_global_seeds(seed: int) -> None:
@@ -96,7 +97,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Genera un vídeo MP4 del modelo final conduciendo en Duckietown.")
     p.add_argument("--algo", default="ppo",
-                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"],
+                   choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac", "a2c"],
                    help="Algoritmo del modelo (elige la clase para .load). Default: ppo.")
     p.add_argument("--model", default="models/best_agent",
                    help="Ruta al .zip del modelo (con o sin extensión).")
