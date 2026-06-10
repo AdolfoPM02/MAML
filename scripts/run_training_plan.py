@@ -96,6 +96,26 @@ STAGES = {
     "ppo_safe_discrete_loop20k": dict(
         algo="ppo", timesteps=20_000, output="ppo_safe_discrete_loop_20k",
         map="Duckietown-loop_empty-v0", action_mode="safe_discrete"),
+    # CURRICULUM PROGRESIVO con safe_discrete: aprender primero en straight_road (más
+    # fácil) y luego fine-tuning a loop_empty. PPO desde cero en loop_empty seguía siendo
+    # demasiado difícil. eval_maps incluye straight_road (donde entrena) además de los
+    # mapas estándar; loop_obstacles solo con --allow-eval-hidden.
+    "ppo_safe_discrete_straight10k": dict(
+        algo="ppo", timesteps=10_000, output="ppo_safe_discrete_straight_10k",
+        map="Duckietown-straight_road-v0", action_mode="safe_discrete",
+        eval_maps=["Duckietown-straight_road-v0", "Duckietown-loop_empty-v0",
+                   "Duckietown-small_loop-v0"]),
+    "ppo_safe_discrete_straight20k": dict(
+        algo="ppo", timesteps=20_000, output="ppo_safe_discrete_straight_20k",
+        map="Duckietown-straight_road-v0", action_mode="safe_discrete",
+        eval_maps=["Duckietown-straight_road-v0", "Duckietown-loop_empty-v0",
+                   "Duckietown-small_loop-v0"]),
+    # Fine-tuning a loop_empty CONTINUANDO desde el modelo de straight_road (10k).
+    # Mismo action_mode (safe_discrete) -> espacios compatibles para cargar.
+    "ppo_safe_discrete_straight_to_loop10k": dict(
+        algo="ppo", timesteps=10_000, output="ppo_safe_discrete_straight_to_loop_10k",
+        map="Duckietown-loop_empty-v0", action_mode="safe_discrete",
+        init_model="models/ppo_safe_discrete_straight_10k"),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
@@ -193,8 +213,11 @@ def eval_commands(args: argparse.Namespace, stage: dict, output: str) -> list[st
     # Evaluar con el MISMO action_mode del entrenamiento (si no, la carga fallaría
     # por espacios distintos en v_omega).
     am = f' --action-mode {stage["action_mode"]}' if stage.get("action_mode") else ""
+    # Mapas de evaluación: el stage puede sobreescribir EVAL_MAPS (p. ej. evaluar también
+    # en el mismo mapa donde entrenó). loop_obstacles se añade aparte con --allow-eval.
+    eval_maps = stage.get("eval_maps", EVAL_MAPS)
     cmds = []
-    for m in EVAL_MAPS:
+    for m in eval_maps:
         cmds.append(f'{_prefix(args)}{args.python} eval.py '
                     f'--algo {stage["algo"]} --model models/{output} --map {m} '
                     f'--episodes {args.episodes} --device {args.device} '
