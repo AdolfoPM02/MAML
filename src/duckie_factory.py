@@ -89,18 +89,54 @@ def gym_duckietown_available() -> bool:
     return False
 
 
-def _make_real_env(env_name: str, seed: int):
-    """Crea el entorno REAL con gym antiguo, o lanza RuntimeError claro si no se puede."""
+def _related_env_ids(old_gym) -> list[str]:
+    """IDs registrados en gym que parezcan de Duckietown (para mensajes de error útiles)."""
     try:
-        import gym as old_gym  # gym antiguo, requerido por gym_duckietown
-        env = old_gym.make(env_name)
+        reg = old_gym.envs.registry
+        specs = (reg.values() if hasattr(reg, "values")
+                 else reg.env_specs.values() if hasattr(reg, "env_specs") else [])
+        ids = []
+        for spec in specs:
+            sid = getattr(spec, "id", str(spec))
+            low = sid.lower()
+            if "duckietown" in low or "duckie" in low or "loop" in low:
+                ids.append(sid)
+        return sorted(set(ids))
+    except Exception:
+        return []
+
+
+def _make_real_env(env_name: str, seed: int):
+    """Crea el entorno REAL con gym antiguo, o lanza RuntimeError claro si no se puede.
+
+    IMPRESCINDIBLE: importar `gym_duckietown` ANTES de `gym.make`, porque ese import es lo
+    que REGISTRA los IDs (p. ej. 'Duckietown-loop_empty-v0'). Sin él, gym.make da
+    NameNotFound aunque el paquete esté instalado.
+    """
+    import gym as old_gym  # gym antiguo, requerido por gym_duckietown
+
+    # 1) Registrar los entornos importando gym_duckietown.
+    try:
+        import gym_duckietown  # noqa: F401
     except Exception as e:
         raise RuntimeError(
-            f"No se pudo crear el entorno REAL de Duckietown '{env_name}': "
-            f"{type(e).__name__}: {e}. ¿Está instalado y registrado gym-duckietown? "
-            f"Comprueba `import gym_duckietown`. Para pruebas SIN Duckietown usa "
-            f"use_mock=True (--use-mock); NO se cae al mock automáticamente con use_mock=False."
+            "No se pudo importar gym_duckietown (necesario para registrar los entornos "
+            "reales). Instala duckietown-gym-daffy / gym-duckietown. Para pruebas SIN "
+            "Duckietown usa use_mock=True (--use-mock); NO se cae al mock con use_mock=False."
         ) from e
+
+    # 2) Crear el entorno; si falla, listar IDs registrados relacionados (ayuda mucho).
+    try:
+        env = old_gym.make(env_name)
+    except Exception as e:
+        related = _related_env_ids(old_gym)
+        raise RuntimeError(
+            f"No se pudo crear el entorno REAL de Duckietown '{env_name}': "
+            f"{type(e).__name__}: {e}. IDs registrados relacionados "
+            f"(Duckietown/duckie/loop): {related}. "
+            f"Para pruebas SIN Duckietown usa use_mock=True (--use-mock)."
+        ) from e
+
     print(f"[duckie_factory] Using real Duckietown env: {env_name}")
     # Best-effort: sembrar el entorno real. gym antiguo usa env.seed(); no rompemos si
     # no existe o falla (no se promete reproducibilidad bit a bit del simulador).
