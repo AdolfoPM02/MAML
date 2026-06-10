@@ -140,6 +140,17 @@ STAGES = {
         map="Duckietown-straight_road-v0", action_mode="safe_discrete",
         eval_maps=["Duckietown-straight_road-v0", "Duckietown-loop_empty-v0",
                    "Duckietown-small_loop-v0"]),
+    # WHEELS_FIXED: convención de ruedas corregida (el diagnóstico confirmó que la real es
+    # swap_negate respecto a 'wheels'). PPO continuo con la semántica correcta de ruedas.
+    "ppo_wheels_fixed_loop5k": dict(
+        algo="ppo", timesteps=5_000, output="ppo_wheels_fixed_loop_5k",
+        map="Duckietown-loop_empty-v0", action_mode="wheels_fixed"),
+    "ppo_wheels_fixed_loop20k": dict(
+        algo="ppo", timesteps=20_000, output="ppo_wheels_fixed_loop_20k",
+        map="Duckietown-loop_empty-v0", action_mode="wheels_fixed"),
+    "ppo_wheels_fixed_loop50k": dict(
+        algo="ppo", timesteps=50_000, output="ppo_wheels_fixed_loop_50k",
+        map="Duckietown-loop_empty-v0", action_mode="wheels_fixed"),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,

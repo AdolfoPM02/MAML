@@ -123,7 +123,7 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "set_env(real) — evita el segfault de SB3 + Duckietown real.")
     p.add_argument("--n-stack", type=int, default=config.N_STACK)
     p.add_argument("--action-mode", default="wheels",
-                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"],
+                   choices=["wheels", "wheels_fixed", "v_omega", "v_omega_safe", "safe_discrete"],
                    help="Semántica de la acción; debe COINCIDIR con la usada al entrenar. "
                         "'wheels' = [left_wheel, right_wheel]; 'v_omega' = [v, omega] -> "
                         "ruedas; 'v_omega_safe' = v_omega acotado; 'safe_discrete' = "

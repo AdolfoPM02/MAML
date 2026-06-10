@@ -117,7 +117,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--allow-eval", action="store_true",
                    help="Habilita Duckietown-loop_obstacles-v0 SOLO PARA EVALUACIÓN.")
     p.add_argument("--action-mode", default="wheels",
-                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"],
+                   choices=["wheels", "wheels_fixed", "v_omega", "v_omega_safe", "safe_discrete"],
                    help="Semántica de la acción; debe COINCIDIR con la usada al entrenar. "
                         "'wheels' = [left_wheel, right_wheel]; 'v_omega' = [v, omega] -> "
                         "ruedas; 'v_omega_safe' = v_omega acotado; 'safe_discrete' = "

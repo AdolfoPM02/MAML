@@ -88,10 +88,18 @@ class DuckieWrapper(gym.Env):
         #                 se traduce a velocidades de rueda de SAFE_DISCRETE_ACTIONS.
         #                 PPO continuo no aprendía conducción estable; aquí PPO elige
         #                 entre 5 maniobras seguras predefinidas.
-        if action_mode not in ("wheels", "v_omega", "v_omega_safe", "safe_discrete"):
+        #   - "wheels_fixed" : CORRIGE la convención de ruedas. El diagnóstico
+        #                 (debug_rollout_actions.py) mostró que best_agent.zip conduce
+        #                 bien solo con la transformación 'swap_negate'; es decir, la
+        #                 convención real es la opuesta+intercambiada a 'wheels'. Mismo
+        #                 action_space que wheels (Box([-1,-1],[1,1])), pero:
+        #                     mapped = [-raw[1], -raw[0]]
+        #                 (rueda izq = -raw_right, rueda der = -raw_left).
+        if action_mode not in ("wheels", "wheels_fixed", "v_omega", "v_omega_safe",
+                               "safe_discrete"):
             raise ValueError(
-                f"action_mode debe ser 'wheels', 'v_omega', 'v_omega_safe' o "
-                f"'safe_discrete'; recibido {action_mode!r}.")
+                f"action_mode debe ser 'wheels', 'wheels_fixed', 'v_omega', "
+                f"'v_omega_safe' o 'safe_discrete'; recibido {action_mode!r}.")
         self._action_mode = action_mode
 
         # Parámetros del modo seguro continuo (suaves a propósito).
@@ -107,7 +115,7 @@ class DuckieWrapper(gym.Env):
                 high=np.array([1.0, 1.0], dtype=np.float32),
                 dtype=np.float32,
             )
-        else:  # "wheels" y "v_omega_safe": ambos Box([-1,-1], [1,1])
+        else:  # "wheels", "wheels_fixed" y "v_omega_safe": todos Box([-1,-1], [1,1])
             self.action_space = spaces.Box(
                 low=np.array([-1.0, -1.0], dtype=np.float32),
                 high=np.array([1.0, 1.0], dtype=np.float32),
@@ -172,6 +180,8 @@ class DuckieWrapper(gym.Env):
                              v = v_min + (a_speed+1)/2 * (v_max-v_min);  omega = omega_max*a_turn;
                              left=clip(v-omega,-1,1), right=clip(v+omega,-1,1).
           - "safe_discrete": action es un entero 0..4; mapped = SAFE_DISCRETE_ACTIONS[idx].
+          - "wheels_fixed" : raw=clip(a,-1,1); mapped = [-raw[1], -raw[0]] (convención
+                             corregida: equivale a la transformación 'swap_negate').
         """
         if self._action_mode == "safe_discrete":
             idx = int(np.asarray(action).reshape(-1)[0])
@@ -202,6 +212,12 @@ class DuckieWrapper(gym.Env):
             left = float(np.clip(v - omega, -1.0, 1.0))
             right = float(np.clip(v + omega, -1.0, 1.0))
             extra = {"v": float(v), "omega": float(omega)}
+        elif self._action_mode == "wheels_fixed":
+            a0 = float(np.clip(raw[0], -1.0, 1.0))
+            a1 = float(np.clip(raw[1], -1.0, 1.0))
+            raw = np.array([a0, a1], dtype=np.float32)  # raw_action = acción clipped
+            left = -a1   # convención corregida (swap_negate)
+            right = -a0
         else:  # "wheels"
             left = float(np.clip(raw[0], -1.0, 1.0))
             right = float(np.clip(raw[1], -1.0, 1.0))

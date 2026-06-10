@@ -51,6 +51,9 @@ DEFAULT_CASES = [
     ("safe_discrete", 2, "derecha suave [0.20, 0.12]"),
     ("safe_discrete", 3, "izquierda media [0.08, 0.22]"),
     ("safe_discrete", 4, "derecha media [0.22, 0.08]"),
+    # wheels_fixed: convención corregida (swap_negate) mapped = [-raw[1], -raw[0]].
+    ("wheels_fixed", [-0.6, -0.012], "mapped esperado [0.012, 0.6]"),
+    ("wheels_fixed", [0.012, 0.6],   "mapped esperado [-0.6, -0.012]"),
 ]
 
 
@@ -109,7 +112,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--steps", type=int, default=30,
                    help="Pasos por caso con la acción fija (default 30).")
     p.add_argument("--action-mode", default=None,
-                   choices=["wheels", "v_omega", "v_omega_safe", "safe_discrete"],
+                   choices=["wheels", "wheels_fixed", "v_omega", "v_omega_safe", "safe_discrete"],
                    help="Si se indica, solo se prueban los casos de ese modo; si se omite, "
                         "se prueban todos los casos por defecto (los cuatro modos).")
     return p.parse_args(argv)
