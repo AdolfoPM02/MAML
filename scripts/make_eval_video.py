@@ -5,8 +5,9 @@ Es una utilidad CUALITATIVA y OPCIONAL: la evaluación cuantitativa oficial sigu
 entorno IDÉNTICO al de entrenamiento (`build_vec_env` + `VecFrameStack(4)` → obs
 (4,64,64)) y graba el agente conduciendo, guardando un .mp4.
 
-Para evitar grabar un rollout degenerado (p. ej. el coche parado), corre VARIOS rollouts
-y guarda el de MAYOR recompensa acumulada.
+Por defecto graba UN ÚNICO rollout reproducible (con `--seed`, default 42). De forma
+opcional, con `--rollouts > 1` corre varios rollouts y guarda el de MAYOR recompensa
+acumulada (útil para descartar un rollout degenerado, p. ej. el coche parado).
 
 No entrena nada. Reutiliza el patrón `model-first` de `eval.py` (cargar el modelo sobre
 un entorno sintético y luego `set_env(real)`) para evitar el segfault de SB3 + Duckietown.
@@ -18,7 +19,7 @@ Ejemplos:
 
     # Colab con Duckietown real (headless):
     xvfb-run -a python scripts/make_eval_video.py --model models/best_agent \
-        --map Duckietown-loop_empty-v0 --out outputs/best_agent_loop_empty.mp4 --rollouts 5
+        --map Duckietown-loop_empty-v0 --out outputs/best_agent_loop_empty.mp4 --rollouts 1 --seed 42
 """
 
 from __future__ import annotations
@@ -95,8 +96,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="Mapa de TRAIN_MAPS, o el de evaluación oculto (solo --allow-eval).")
     p.add_argument("--out", default="outputs/best_agent_loop_empty.mp4",
                    help="Ruta de salida del .mp4 (se crea el directorio si falta).")
-    p.add_argument("--rollouts", type=int, default=3,
-                   help="Nº de rollouts a probar; se guarda el de MAYOR recompensa.")
+    p.add_argument("--rollouts", type=int, default=1,
+                   help="Nº de rollouts. Default 1 = un único rollout reproducible (con "
+                        "--seed). Solo si --rollouts > 1 se prueban varios y se guarda el "
+                        "de MAYOR recompensa.")
     p.add_argument("--max-steps", type=int, default=1500,
                    help="Límite de pasos por rollout (corta rollouts que no terminan).")
     p.add_argument("--fps", type=int, default=30, help="FPS del vídeo de salida.")
@@ -179,7 +182,7 @@ def main(argv=None) -> None:
     set_global_seeds(args.seed)
     print("=" * 64)
     print(f"VIDEO | algo={args.algo} | model={args.model} | map={args.map}")
-    print(f"      | rollouts={args.rollouts} | mock={args.use_mock} | "
+    print(f"      | rollouts={args.rollouts} | seed={args.seed} | mock={args.use_mock} | "
           f"allow_eval={args.allow_eval} | out={args.out}")
     print("=" * 64)
 

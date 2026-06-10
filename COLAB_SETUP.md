@@ -485,14 +485,14 @@ En Colab se genera el artefacto del contrato copiándolo al nombre exacto **`bes
 
 **Vídeo demostrativo (opcional).** La última celda del notebook genera un MP4 **cualitativo**
 del agente conduciendo a partir de `best_agent.zip` (la evaluación **cuantitativa oficial**
-sigue siendo `eval.py`). Usa `scripts/make_eval_video.py`, que corre varios *rollouts* y
-guarda el de **mayor recompensa** (evita un episodio sin movimiento). El vídeo se escribe en
+sigue siendo `eval.py`). Usa `scripts/make_eval_video.py` con un **único rollout
+reproducible con seed 42** (`--rollouts 1 --seed 42`). El vídeo se escribe en
 **`outputs/`** (`outputs/best_agent_loop_empty.mp4`, ignorado por git) y se muestra embebido.
 No entrena nada ni es necesario para evaluar el modelo. Regenerar a mano:
 ```bash
 !env MPLBACKEND=Agg CUDA_VISIBLE_DEVICES="" xvfb-run -a {PY} scripts/make_eval_video.py \
   --algo ppo --model models/best_agent --map Duckietown-loop_empty-v0 \
-  --out outputs/best_agent_loop_empty.mp4 --rollouts 5 --device cpu
+  --out outputs/best_agent_loop_empty.mp4 --rollouts 1 --seed 42 --device cpu
 ```
 
 ---
