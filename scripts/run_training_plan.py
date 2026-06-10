@@ -46,6 +46,22 @@ STAGES = {
                           action_mode="v_omega"),
     "ppo_vomega20k": dict(algo="ppo", timesteps=20_000, output="ppo_vomega_20k",
                           action_mode="v_omega"),
+    # CURRICULUM (alineado con las DIAPOSITIVAS): PPO v_omega entrenado en los 5 mapas
+    # PERMITIDOS (orden fácil -> difícil) y EVALUADO en el mapa OCULTO loop_obstacles
+    # (--allow-eval-hidden). loop_obstacles NUNCA se usa para entrenar. Multi-mapa:
+    # build_vec_env crea un entorno por mapa (model-first ajusta num_envs al nº de mapas).
+    "ppo_vomega_curriculum5k": dict(
+        algo="ppo", timesteps=5_000, output="ppo_vomega_curriculum_5k",
+        action_mode="v_omega",
+        maps=["Duckietown-straight_road-v0", "Duckietown-loop_empty-v0",
+              "Duckietown-small_loop-v0", "Duckietown-zigzag_dists-v0",
+              "Duckietown-udem1-v0"]),
+    "ppo_vomega_curriculum20k": dict(
+        algo="ppo", timesteps=20_000, output="ppo_vomega_curriculum_20k",
+        action_mode="v_omega",
+        maps=["Duckietown-straight_road-v0", "Duckietown-loop_empty-v0",
+              "Duckietown-small_loop-v0", "Duckietown-zigzag_dists-v0",
+              "Duckietown-udem1-v0"]),
     # Fase 3: PPO AVANZADO = PPO con HIPERPARÁMETROS diferenciados (algo=ppo_adv).
     # NO multimapa: se descartó map=all porque rompe --init-order model-first
     # (set_env num_envs 5 != 1). Usa el mapa por defecto (loop_empty), igual que ppo20k,
@@ -116,15 +132,18 @@ def _prefix(args: argparse.Namespace) -> str:
     return pre
 
 
-def stage_train_map(args: argparse.Namespace, stage: dict) -> str:
-    """Mapa de ENTRENAMIENTO efectivo. El mapa propio del stage PREVALECE sobre --map
-    (p. ej. ppo_adv* fuerza map=all); si el stage no define mapa, se usa --map."""
-    return stage.get("map", args.map)
+def stage_train_maps(args: argparse.Namespace, stage: dict) -> list[str]:
+    """Lista de mapas de ENTRENAMIENTO efectiva. Prioridad: 'maps' (lista, curriculum
+    multi-mapa) > 'map' (un mapa propio del stage) > --map del lanzador."""
+    if stage.get("maps"):
+        return list(stage["maps"])
+    return [stage.get("map", args.map)]
 
 
 def train_command(args: argparse.Namespace, stage: dict, output: str) -> str:
+    maps = " ".join(stage_train_maps(args, stage))
     cmd = (f'{_prefix(args)}{args.python} train.py '
-           f'--algo {stage["algo"]} --map {stage_train_map(args, stage)} '
+           f'--algo {stage["algo"]} --map {maps} '
            f'--timesteps {stage["timesteps"]} --output {output} '
            f'--device {args.device} --init-order {args.init_order} --seed {args.seed}')
     if stage.get("init_model"):  # fine-tuning: continuar desde un modelo guardado
@@ -159,13 +178,13 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     stage = STAGES[args.stage]
     output = args.output or stage["output"]
-    train_map = stage_train_map(args, stage)  # mapa efectivo (stage prevalece sobre --map)
+    train_maps = stage_train_maps(args, stage)  # mapas efectivos (stage prevalece sobre --map)
 
-    # SEGURIDAD: jamás entrenar en el mapa de evaluación oculto (se comprueba el EFECTIVO).
-    if train_map == config.EVAL_MAP:
+    # SEGURIDAD: jamás entrenar en el mapa de evaluación oculto (se comprueba TODA la lista).
+    if config.EVAL_MAP in train_maps:
         raise ValueError(
-            f"'{train_map}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él "
-            f"(descalificación). Usa un mapa de TRAIN_MAPS o 'all'; loop_obstacles solo se "
+            f"'{config.EVAL_MAP}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él "
+            f"(descalificación). Usa mapas de TRAIN_MAPS o 'all'; loop_obstacles solo se "
             f"evalúa con --allow-eval-hidden."
         )
 
@@ -187,7 +206,7 @@ def main(argv=None) -> None:
     print("=" * 70)
     print(f"PLAN | stage={args.stage} | algo={stage['algo']} | "
           f"timesteps={stage['timesteps']} | output={output}")
-    print(f"     | map(train)={train_map} | device={args.device} ({gpu}) | "
+    print(f"     | map(train)={train_maps} | device={args.device} ({gpu}) | "
           f"eval_after={args.eval_after} | allow_eval_hidden={args.allow_eval_hidden} | "
           f"execute={execute}")
     print("=" * 70)

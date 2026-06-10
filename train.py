@@ -202,27 +202,44 @@ def get_algo_spec(algo: str, smoke: bool) -> dict:
     raise ValueError(f"Algoritmo desconocido: {algo!r}")
 
 
-def resolve_maps(map_arg: str) -> list[str]:
-    """'all' -> TRAIN_MAPS; un nombre exacto -> [nombre]. Bloquea EVAL_MAP."""
-    if map_arg == "all":
-        return list(config.TRAIN_MAPS)
-    if map_arg == config.EVAL_MAP:
-        raise ValueError(
-            f"'{map_arg}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él."
-        )
-    if map_arg not in config.TRAIN_MAPS:
-        raise ValueError(
-            f"Mapa {map_arg!r} no está en TRAIN_MAPS. Válidos: {config.TRAIN_MAPS} o 'all'."
-        )
-    return [map_arg]
+def resolve_maps(map_args: list[str] | str) -> list[str]:
+    """Resuelve la lista de mapas de ENTRENAMIENTO (multi-mapa / curriculum).
+
+    Acepta una lista (varios `--map`) o un solo nombre. 'all' se expande a TRAIN_MAPS.
+    Valida cada mapa, BLOQUEA el mapa de evaluación oculto y elimina duplicados
+    preservando el orden (relevante para curriculum: fácil -> difícil).
+    """
+    if isinstance(map_args, str):
+        map_args = [map_args]
+
+    expanded: list[str] = []
+    for m in map_args:
+        if m == "all":
+            expanded.extend(config.TRAIN_MAPS)
+        else:
+            expanded.append(m)
+
+    for m in expanded:
+        if m == config.EVAL_MAP:
+            raise ValueError(
+                f"'{m}' es el mapa de EVALUACIÓN oculto: prohibido entrenar en él."
+            )
+        if m not in config.TRAIN_MAPS:
+            raise ValueError(
+                f"Mapa {m!r} no está en TRAIN_MAPS. Válidos: {config.TRAIN_MAPS} o 'all'."
+            )
+    # dedupe preservando orden
+    return list(dict.fromkeys(expanded))
 
 
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Entrenar DQN/PPO/SAC en Duckietown.")
     p.add_argument("--algo", required=True,
                    choices=["dqn", "ppo", "ppo_adv", "ppo_adv_v2", "sac"])
-    p.add_argument("--map", default="all",
-                   help="Nombre exacto de TRAIN_MAPS o 'all' (default).")
+    p.add_argument("--map", nargs="+", default=["all"],
+                   help="Uno o VARIOS mapas de TRAIN_MAPS (multi-mapa / curriculum), o "
+                        "'all' (default) para todos. Ej: --map Duckietown-straight_road-v0 "
+                        "Duckietown-loop_empty-v0. Nunca loop_obstacles (bloqueado).")
     p.add_argument("--timesteps", type=int, default=1_000_000)
     p.add_argument("--seed", type=int, default=42,
                    help="Semilla para random/numpy/torch, el modelo SB3 y el entorno.")
@@ -302,11 +319,15 @@ def main(argv=None) -> None:
     if args.init_order == "model-first":
         # Construir el modelo SB3 sobre un env SINTÉTICO (sin Duckietown) y luego
         # set_env(real). Evita el segfault de inicializar PPO/torch con Duckietown.
+        # El placeholder debe tener TANTOS envs como mapas (multi-mapa): así num_envs
+        # coincide con el VecEnv real y set_env(real) no falla (5 != 1).
         placeholder = DummyVecEnv(
-            [lambda: _PlaceholderEnv(spec["discrete"], args.n_stack,
-                                     action_mode=args.action_mode)])
+            [(lambda: _PlaceholderEnv(spec["discrete"], args.n_stack,
+                                      action_mode=args.action_mode))
+             for _ in maps])
         model = _build_model(spec, placeholder, args, policy_kwargs)
-        print("[model-first] modelo listo sobre env sintético; creando Duckietown...")
+        print(f"[model-first] modelo listo sobre {len(maps)} env(s) sintético(s); "
+              f"creando Duckietown...")
         env = build_vec_env(maps, discrete=spec["discrete"], use_mock=use_mock,
                             seed=args.seed, n_stack=args.n_stack,
                             action_mode=args.action_mode)
