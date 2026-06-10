@@ -116,6 +116,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--constant-action", type=int, default=None,
                    help="No carga modelo: repite SIEMPRE esta acción discreta (safe_discrete, "
                         "0..4). Sirve para medir el reward de ir recto/girar fijo.")
+    p.add_argument("--constant-continuous-action", type=float, nargs=2,
+                   default=None, metavar=("L", "R"),
+                   help="No carga modelo: repite SIEMPRE la acción CONTINUA [L, R] (solo "
+                        "action_mode continuo: wheels/wheels_fixed/v_omega/v_omega_safe). "
+                        "Sirve para probar a mano qué acción produce avance equilibrado.")
     p.add_argument("--print-every", type=int, default=1,
                    help="Imprimir detalle cada N pasos (default 1 = todos).")
     p.add_argument("--action-transform", default="identity",
@@ -156,12 +161,23 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     set_global_seeds(args.seed)
 
-    use_model = not (args.random_policy or args.constant_action is not None)
+    use_model = not (args.random_policy or args.constant_action is not None
+                     or args.constant_continuous_action is not None)
     if use_model and not args.model:
-        raise SystemExit("Falta --model (o usa --random-policy / --constant-action).")
+        raise SystemExit("Falta --model (o usa --random-policy / --constant-action / "
+                         "--constant-continuous-action).")
+    if args.constant_action is not None and args.constant_continuous_action is not None:
+        raise SystemExit("Usa --constant-action O --constant-continuous-action, no ambos.")
     if args.constant_action is not None and args.action_mode != "safe_discrete":
-        print("[WARN] --constant-action está pensado para safe_discrete; "
-              f"action_mode={args.action_mode}.")
+        raise SystemExit(
+            f"--constant-action es SOLO para safe_discrete (recibido action_mode="
+            f"{args.action_mode}). Para acciones continuas usa "
+            f"--constant-continuous-action L R (p. ej. wheels 0.4 0.4).")
+    if args.constant_continuous_action is not None and args.action_mode == "safe_discrete":
+        raise SystemExit(
+            "--constant-continuous-action no aplica a safe_discrete (acción discreta). "
+            "Usa --constant-action 0..4, o un action_mode continuo "
+            "(wheels/wheels_fixed/v_omega/v_omega_safe).")
     if args.action_transform != "identity" and args.action_mode == "safe_discrete":
         raise SystemExit(
             f"--action-transform={args.action_transform} no aplica a safe_discrete "
@@ -171,6 +187,8 @@ def main(argv=None) -> None:
     print("=" * 72)
     mode = ("RANDOM" if args.random_policy else
             f"CONSTANT({args.constant_action})" if args.constant_action is not None else
+            f"CONSTANT_CONT({args.constant_continuous_action})"
+            if args.constant_continuous_action is not None else
             f"MODEL({args.algo}:{args.model})")
     print(f"DEBUG ROLLOUT | {mode} | map={args.map} | action_mode={args.action_mode} | "
           f"reset_mode={args.reset_mode}")
@@ -186,14 +204,14 @@ def main(argv=None) -> None:
             [lambda: _PlaceholderEnv(args.action_mode, args.n_stack)])
         model = ALGO_CLASSES[args.algo].load(args.model, env=placeholder, device=args.device)
         env = build_vec_env([args.map], discrete=False,
-                            use_mock=(args.use_mock or None), seed=args.seed,
+                            use_mock=args.use_mock, seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
                             action_mode=args.action_mode, reset_mode=args.reset_mode)
         model.set_env(env)
         placeholder.close()
     else:
         env = build_vec_env([args.map], discrete=False,
-                            use_mock=(args.use_mock or None), seed=args.seed,
+                            use_mock=args.use_mock, seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
                             action_mode=args.action_mode, reset_mode=args.reset_mode)
 
@@ -208,6 +226,8 @@ def main(argv=None) -> None:
             act = np.array([env.action_space.sample()])
         elif args.constant_action is not None:
             act = np.array([args.constant_action])
+        elif args.constant_continuous_action is not None:
+            act = np.array([args.constant_continuous_action], dtype=np.float32)
         else:
             act, _ = model.predict(obs, deterministic=args.deterministic)
 

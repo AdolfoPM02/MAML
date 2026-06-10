@@ -326,7 +326,9 @@ def main(argv=None) -> None:
     maps = resolve_maps(args.map)
     timesteps = 512 if args.smoke else args.timesteps
     output = args.output or f"{args.algo}_duckie"
-    use_mock = True if args.use_mock else None  # None -> autodetecta en Colab
+    # Real por defecto: sin --use-mock se EXIGE Duckietown real (si no está, make_base_env
+    # lanza RuntimeError). Así NUNCA se entrena con el mock (ruido) por accidente.
+    use_mock = bool(args.use_mock)
 
     print("=" * 64)
     print(f"TRAIN | algo={args.algo} | maps={maps} | timesteps={timesteps}")

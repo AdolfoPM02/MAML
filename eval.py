@@ -153,7 +153,7 @@ def evaluate(args: argparse.Namespace) -> dict:
                                      action_mode=args.action_mode)])
         model = cls.load(args.model, env=placeholder, device=args.device)
         env = build_vec_env([args.map], discrete=discrete,
-                            use_mock=(args.use_mock or None), seed=args.seed,
+                            use_mock=args.use_mock, seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
                             action_mode=args.action_mode, reset_mode=args.reset_mode)
         model.set_env(env)
@@ -161,7 +161,7 @@ def evaluate(args: argparse.Namespace) -> dict:
     else:
         # env-first (default): crear el entorno real y cargar el modelo con él.
         env = build_vec_env([args.map], discrete=discrete,
-                            use_mock=(args.use_mock or None), seed=args.seed,
+                            use_mock=args.use_mock, seed=args.seed,
                             n_stack=args.n_stack,
                             allow_eval=args.allow_eval,  # GUARD: bloquea EVAL_MAP sin allow_eval
                             action_mode=args.action_mode, reset_mode=args.reset_mode)

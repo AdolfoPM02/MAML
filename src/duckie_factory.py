@@ -16,6 +16,8 @@ entorno real automáticamente.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 # Resolución típica de la cámara de Duckietown (alto, ancho, canales).
@@ -61,30 +63,45 @@ class MockDuckietownEnv:
 
 
 def gym_duckietown_available() -> bool:
-    """True si gym_duckietown se puede importar (entorno real disponible)."""
-    try:
-        import gym_duckietown  # noqa: F401
-        return True
-    except Exception:
-        return False
+    """True si el entorno REAL de Duckietown está disponible (no solo `import gym_duckietown`).
 
-
-def make_base_env(env_name: str, use_mock: bool | None = None,
-                  seed: int = 0):
-    """Crea el entorno base (real o mock) con interfaz de gym antiguo.
-
-    use_mock=None -> autodetecta: usa real si gym_duckietown está disponible.
-    use_mock=True -> fuerza el mock (desarrollo local).
-    use_mock=False -> fuerza el real (fallará si gym_duckietown no está instalado).
+    Importar `gym_duckietown` (o sus submódulos) es lo que REGISTRA los entornos en gym;
+    además se comprueba el registro de gym por si lo registrara otro paquete. NO instancia
+    el simulador (eso es caro y puede segfaultear): solo verifica import + registro.
     """
-    if use_mock is None:
-        use_mock = not gym_duckietown_available()
+    # 1) Importar alguno de los módulos que registran los entornos.
+    for mod in ("gym_duckietown", "gym_duckietown.envs", "gym_duckietown.simulator"):
+        try:
+            __import__(mod)
+            return True
+        except Exception:
+            continue
+    # 2) ¿Hay algún entorno 'Duckietown-*' registrado en gym? (por si otro paquete lo hace)
+    try:
+        import gym as old_gym
+        reg = old_gym.envs.registry
+        keys = (reg.env_specs.keys() if hasattr(reg, "env_specs")
+                else reg.keys() if hasattr(reg, "keys") else list(reg))
+        if any("Duckietown" in str(k) for k in keys):
+            return True
+    except Exception:
+        pass
+    return False
 
-    if use_mock:
-        return MockDuckietownEnv(env_name=env_name, seed=seed)
 
-    import gym as old_gym  # gym antiguo, requerido por gym_duckietown
-    env = old_gym.make(env_name)
+def _make_real_env(env_name: str, seed: int):
+    """Crea el entorno REAL con gym antiguo, o lanza RuntimeError claro si no se puede."""
+    try:
+        import gym as old_gym  # gym antiguo, requerido por gym_duckietown
+        env = old_gym.make(env_name)
+    except Exception as e:
+        raise RuntimeError(
+            f"No se pudo crear el entorno REAL de Duckietown '{env_name}': "
+            f"{type(e).__name__}: {e}. ¿Está instalado y registrado gym-duckietown? "
+            f"Comprueba `import gym_duckietown`. Para pruebas SIN Duckietown usa "
+            f"use_mock=True (--use-mock); NO se cae al mock automáticamente con use_mock=False."
+        ) from e
+    print(f"[duckie_factory] Using real Duckietown env: {env_name}")
     # Best-effort: sembrar el entorno real. gym antiguo usa env.seed(); no rompemos si
     # no existe o falla (no se promete reproducibilidad bit a bit del simulador).
     try:
@@ -93,3 +110,34 @@ def make_base_env(env_name: str, use_mock: bool | None = None,
     except Exception:
         pass
     return env
+
+
+def make_base_env(env_name: str, use_mock: bool | None = None,
+                  seed: int = 0):
+    """Crea el entorno base (real o mock) con interfaz de gym antiguo.
+
+    use_mock=True  -> fuerza el MOCK (desarrollo local). Avisa por consola.
+    use_mock=False -> fuerza el REAL. Si no está disponible, lanza RuntimeError (NUNCA cae
+                      al mock en silencio: así no se entrena/evalúa con ruido por accidente).
+    use_mock=None  -> autodetecta: real si está disponible; si no, MOCK con WARNING explícito.
+    """
+    if use_mock is True:
+        print(f"[duckie_factory] Using MOCK Duckietown env: {env_name}")
+        return MockDuckietownEnv(env_name=env_name, seed=seed)
+
+    if use_mock is False:
+        # Real OBLIGATORIO: si falla, error claro (no mock silencioso).
+        return _make_real_env(env_name, seed)
+
+    # use_mock is None: autodetección.
+    if gym_duckietown_available():
+        return _make_real_env(env_name, seed)
+    warnings.warn(
+        f"Duckietown real no disponible (no se pudo importar gym_duckietown ni hay un "
+        f"entorno 'Duckietown-*' registrado); usando MockDuckietownEnv para '{env_name}'. "
+        f"Esto produce OBSERVACIONES DE RUIDO. Instala gym-duckietown para el entorno real, "
+        f"o pasa use_mock=True (--use-mock) para silenciar este aviso en pruebas locales.",
+        stacklevel=2,
+    )
+    print(f"[duckie_factory] Using MOCK Duckietown env: {env_name}")
+    return MockDuckietownEnv(env_name=env_name, seed=seed)

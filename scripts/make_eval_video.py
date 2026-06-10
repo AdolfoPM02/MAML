@@ -386,7 +386,7 @@ def make_video(args: argparse.Namespace) -> dict:
         discrete, args.n_stack, action_mode=args.action_mode)])
     model = cls.load(args.model, env=placeholder, device=args.device)
     vec_env = build_vec_env([args.map], discrete=discrete,
-                            use_mock=(args.use_mock or None), seed=args.seed,
+                            use_mock=args.use_mock, seed=args.seed,
                             n_stack=args.n_stack, allow_eval=args.allow_eval,
                             action_mode=args.action_mode, reset_mode=args.reset_mode)
     model.set_env(vec_env)
