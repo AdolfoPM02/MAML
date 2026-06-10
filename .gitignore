@@ -10,6 +10,8 @@ logs/
 *.zip
 !best_agent.zip
 best_duckie_agent.zip
+# Vídeos generados (p. ej. outputs/best_agent_loop_empty.mp4): no se versionan.
+*.mp4
 # Artefactos de compilación LaTeX del report (se versiona report/report.tex y Report.pdf)
 report/*.aux
 report/*.log
