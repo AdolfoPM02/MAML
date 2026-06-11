@@ -237,6 +237,11 @@ predefinidas), \code{v\_omega\_safe} (velocidad/giro acotados a mano), \code{for
 (no implementado), PID ni controladores: aprende de la imagen a velocidades de rueda directas.
 Esas variantes se exploraron y se descartan por inyectar conocimiento de conducción.
 
+\paragraph{Dónde reproducirlo.} El stack exacto y el protocolo completo de
+entrenamiento/evaluación están en \code{requirements.txt}, \code{COLAB\_SETUP.md} y
+\code{EXPERIMENTS.md}; el modelo final se entrena con \code{action\_mode=wheels} y se
+evalúa \emph{sin} \code{--action-mode}.
+
 \section{Limitaciones y trabajo futuro}
 \begin{itemize}
   \item \textbf{Alta varianza entre \emph{resets}:} el desempeño depende mucho de la pose
@@ -251,28 +256,5 @@ Esas variantes se exploraron y se descartan por inyectar conocimiento de conducc
   hacer viable en tiempo el presupuesto alto; y envolver la evaluación con \code{Monitor}
   para métricas de episodio más limpias.
 \end{itemize}
-
-\section*{Reproducibilidad}
-Dependencias: \code{requirements.txt} (\code{stable-baselines3==2.2.1},
-\code{gymnasium==0.29.1}, \code{gym==0.25.2}, \code{torch==2.12.0}) + \code{gym-duckietown}
-aparte (\code{--no-deps}) + re-fijado \code{numpy==1.23.5} (detalle en \code{COLAB\_SETUP.md}).
-Protocolo y tablas en \code{EXPERIMENTS.md}. El modelo final se entrena con
-\code{action\_mode=wheels} y se evalúa \emph{sin} \code{--action-mode}.
-\begin{verbatim}
-# Modelo final: PPO cnn-fix 50k + fine-tuning a 100k (RL puro, action_mode=wheels)
-python train.py --algo ppo --map Duckietown-loop_empty-v0 --timesteps 50000 \
-    --output ppo_cnnfix_loop_empty_50k --init-order model-first
-python train.py --algo ppo --map Duckietown-loop_empty-v0 --timesteps 50000 \
-    --output ppo_cnnfix_loop_empty_100k_ft \
-    --init-model models/ppo_cnnfix_loop_empty_50k --learning-rate-override 5e-5 \
-    --init-order model-first
-
-# Evaluacion en el mapa oculto (SOLO evaluacion) y video (camara real)
-python eval.py --algo ppo --model best_agent.zip \
-    --map Duckietown-loop_obstacles-v0 --allow-eval --init-order model-first --device cpu
-python scripts/make_eval_video.py --algo ppo --model best_agent.zip \
-    --map Duckietown-loop_obstacles-v0 --allow-eval \
-    --video-source wrapper_rgb --rollouts 10 --init-order model-first
-\end{verbatim}
 
 \end{document}
