@@ -226,3 +226,64 @@ oculto `loop_obstacles`.
 
 **Por tanto, el modelo final se mantiene como `best_agent.zip` = PPO 20k**
 (`ppo_loop_empty_20k_gpu`). No se sustituye.
+
+> ⚠️ **SUPERADO.** Esta decisión corresponde a una iteración **anterior a la auditoría
+> técnica**. Tras corregir el bug de **doble normalización de la CNN** (H1) y reevaluar con
+> la infraestructura corregida, las cifras positivas de PPO 20k **no se reprodujeron** y el
+> modelo final **se sustituyó**. Ver la sección **«Consolidación final»** más abajo.
+
+---
+
+## Consolidación final (tras auditoría técnica + fix de CNN)
+
+### Qué cambió respecto a la decisión anterior
+Una auditoría de código detectó dos fallos (ver `Report.pdf`, sección de depuración):
+
+- **H1 — doble normalización en la CNN (crítico).** `src/cnn.py` dividía la entrada entre
+  255, pero SB3 ya normaliza las imágenes `uint8` a `[0,1]` antes del extractor. La CNN
+  recibía valores ~255× demasiado pequeños. Verificado en Colab: `preprocess_obs max =
+  0.7843`, `after extra /255 max = 0.00307`. **Corregido** (commit `Fix double image
+  normalization in CustomCNN`): `x = observations.float()` (sin `/255.0`).
+- **H2 — vocabulario discreto incoherente en DQN.** `DISCRETE_ACTIONS` tiene semántica
+  `[v, giro]` pero en `action_mode=wheels` se interpreta como `[rueda_izq, rueda_der]`, así
+  que DQN no tiene una acción de avance recto real. DQN queda **descartado/sospechoso**.
+
+Reevaluación honesta con la infraestructura corregida (entorno real fail-loud, `model-first`).
+Las cifras positivas previas (p. ej. PPO 20k = +1118 en `loop_obstacles`) **no se
+reprodujeron**; la comparación canónica usa el setup corregido. Métrica principal:
+recompensa media en `loop_obstacles` (solo evaluación). «mejor rollout» = best-of-10 cualitativo.
+
+| modelo | loop_obstacles (media ± std / len) | mejor rollout (best-of-10) | decisión |
+|---|---|---|---|
+| baseline antiguo + `wheels_fixed` | −869.892 ± 548.632 / 1264.4 | — | fallback inicial |
+| PPO 20k *(bug CNN)* | −924.247 ± 441.441 | — | no supera baseline |
+| DQN 20k *(bug CNN)* | −1004.632 ± 30.006 | — | descartado (H2) |
+| SAC 20k *(bug CNN)* | −1021.744 ± 81.371 | — | no supera baseline |
+| PPO 50k single-map *(pre-fix)* | −1481.841 ± 473.287 / 455.6 | — | más pasos no ayudan |
+| PPO multimap 50k *(pre-fix)* | −1764.857 ± 712.795 / 460.0 | −887.770 | multimap no ayuda |
+| PPO **cnn-fix** 50k | −2038.040 ± 1408.025 / 1172.0 | **1225.718** | rollouts positivos, alta varianza |
+| **PPO cnn-fix 100k (ft)** | **−487.620 ± 1049.924 / 742.2** | **1249.527** | **MODELO FINAL** |
+
+Para referencia, la eval del modelo final también en `loop_empty`: −1098.289 ± 742.723 / 501.8.
+
+### Decisión final
+- **Modelo final = `best_agent.zip` = copia de `models/ppo_cnnfix_loop_empty_100k_ft.zip`.**
+  PPO de **RL puro**, entrenado en `loop_empty` con `action_mode=wheels` (sin truco de
+  acción), CNN con la normalización corregida. Procedencia: PPO cnn-fix **50k**
+  (`ppo_cnnfix_loop_empty_50k`) + **fine-tuning 50k** → ~100k pasos.
+- **Justificación:** mejor recompensa media en el mapa oculto que el baseline antiguo
+  (−487.6 vs −869.9) y varios episodios completos con recompensa positiva
+  (mejor rollout 1249.5). Limitación principal: **alta varianza** entre resets.
+- **Evaluación sin `--action-mode`** (usa el `wheels` por defecto), a diferencia del baseline
+  antiguo que requería `wheels_fixed`.
+
+### Artefactos (consolidados en Colab — no re-copiar)
+- `best_agent.zip` (raíz) = nuevo modelo final · `models/final_agent.zip` = copia.
+- `models/best_agent_baseline_old.zip`, `delivery/best_agent_baseline_old.zip`,
+  `delivery/best_agent_baseline.zip` = baseline antiguo preservado (**no borrar**).
+- `delivery/final_agent_loop_obstacles.mp4` = vídeo final (best-of-10, `wrapper_rgb`).
+
+### No entregables (RL puro)
+`safe_discrete` (maniobras predefinidas), `v_omega_safe` (velocidad/giro acotados a mano) y
+`forward_turn` (no implementado) **no son la solución final**: inyectan conocimiento de
+conducción. Tampoco PID ni controladores. El entregable usa acción de rueda directa.

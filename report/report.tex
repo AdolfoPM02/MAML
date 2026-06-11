@@ -28,16 +28,22 @@
 \begin{abstract}
 \noindent
 Se entrena un agente de \emph{Deep Reinforcement Learning} para conducir en el simulador
-3D \textbf{Duckietown} usando únicamente píxeles de la cámara frontal. El trabajo cubre
-tres fases: (1) Q-Learning tabular \emph{desde cero} en \code{FrozenLake-v1}; (2) dos
-baselines con Stable-Baselines3 ---\textbf{DQN} (acción discreta) y \textbf{PPO} (acción
-continua)---; y (3) un algoritmo avanzado, \textbf{SAC}. El modelo final seleccionado es
-un \textbf{PPO entrenado 20\,000 pasos}, que obtiene la mejor recompensa en el mapa oculto
-de evaluación (\code{loop\_obstacles}) y \textbf{supera a las demás variantes
-consideradas}: los baselines DQN, la variante PPO de 50\,000 pasos (que degeneró) y el
-algoritmo avanzado SAC 20k. Se documenta además la resolución de un \emph{segmentation fault}
-nativo (Duckietown\,+\,OpenGL\,+\,SB3) mediante un orden de inicialización
-\emph{model-first}, clave para que el pipeline funcione en Google Colab.
+3D \textbf{Duckietown} usando únicamente píxeles de la cámara frontal, con un enfoque de
+\textbf{RL puro}: la política aprende directamente de la imagen a velocidades de rueda, sin
+controladores, PID, avance forzado ni vocabularios de acción que codifiquen conocimiento de
+conducción. El trabajo cubre tres fases: (1) Q-Learning tabular \emph{desde cero} en
+\code{FrozenLake-v1}; (2) dos baselines con Stable-Baselines3 ---\textbf{DQN} (acción
+discreta) y \textbf{PPO} (acción continua)---; y (3) un algoritmo avanzado (\textbf{SAC}) y
+una depuración sistemática del \emph{pipeline}. La contribución central de la memoria es
+\textbf{honesta}: la mayor parte del esfuerzo fue diagnosticar y corregir una serie de fallos
+de infraestructura que invalidaban silenciosamente los resultados ---caída silenciosa a un
+entorno \emph{mock} de ruido, vídeo de render incorrecto, una convención de acción mal
+documentada y, sobre todo, una \textbf{doble normalización de la imagen en la CNN} que
+reducía las entradas $\sim$255 veces. Tras corregir la normalización, un \textbf{PPO entrenado
+50k pasos y afinado hasta 100k} (RL puro, \code{action\_mode=wheels}) pasa a ser el modelo
+final \code{best\_agent.zip}: mejora la recompensa media en el mapa oculto de evaluación
+\code{loop\_obstacles} respecto al baseline anterior y produce varios episodios completos con
+recompensa positiva, aunque con \textbf{alta varianza} entre \emph{resets}.
 \end{abstract}
 
 \section{Introducción y objetivo}
@@ -46,11 +52,20 @@ de observaciones de imagen, y que \textbf{generalice} a un mapa no visto durante
 entrenamiento. La nota depende del desempeño en el mapa oculto
 \code{Duckietown-loop\_obstacles-v0}, con obstáculos estáticos.
 
+\paragraph{Enfoque: RL puro.} Siguiendo las diapositivas del reto, la solución entregada es
+aprendizaje por refuerzo \emph{de extremo a extremo}: la red recibe la imagen y produce
+directamente la acción de control (velocidades de rueda). \textbf{No} se entrega ningún
+controlador clásico, PID, heurística de avance forzado ni \emph{action mode} diseñado para
+conducir (p.\,ej.\ maniobras discretas predefinidas o velocidades acotadas a mano). Esas
+variantes se exploraron como diagnóstico y se documentan como \emph{descartadas} por
+inyectar conocimiento de conducción (Sección~\ref{sec:descartes}).
+
 \paragraph{Contrato de evaluación.} El modelo debe (i) esperar observaciones de forma
 \code{(1, 64, 64)} apiladas en 4 frames $\rightarrow$ \code{(4, 64, 64)}; (ii) llevar
 definidas e importables las clases personalizadas (\code{CustomCNN}, wrappers); y (iii)
 cargar ``a la primera'' en un entorno limpio reconstruido desde \code{requirements.txt}.
-Entrenar en el mapa oculto supone descalificación.
+Entrenar en el mapa oculto supone descalificación: está bloqueado por \code{ValueError} en
+tres puntos del código (\code{make\_env}, \code{resolve\_maps}, lanzador).
 
 \section{Fase 1: Q-Learning tabular (\texttt{FrozenLake-v1})}
 Como calentamiento se implementa Q-Learning tabular sin librerías de Deep RL sobre
@@ -74,182 +89,245 @@ $\sim$20k y se estabiliza en torno a 0.45--0.50.}
 \label{fig:frozenlake}
 \end{figure}
 
-\section{Pipeline de visión y arquitectura}
-El entorno real de Duckietown (API de \code{gym} antiguo) se adapta a Gymnasium mediante
-\code{DuckieWrapper} (\code{src/wrappers.py}). El procesamiento de cada observación es:
+\section{Entorno, pipeline de visión y arquitectura}
+\paragraph{Entorno.} Duckietown se ejecuta sobre la API de \code{gym} \emph{clásico}
+(0.25.2), no Gymnasium, por compatibilidad con \code{gym-duckietown} (\code{daffy},
+versión 6.1.34). \code{DuckieWrapper} (\code{src/wrappers.py}) adapta esa API antigua
+(4-tupla) a Gymnasium (5-tupla) que espera Stable-Baselines3, y expone un espacio de acción
+\emph{continuo}. La acción real del simulador son las \textbf{velocidades de las dos ruedas}
+$[\,v_{\text{izq}}, v_{\text{der}}\,]\in[-1,1]^2$ (\code{action\_mode=wheels}); el agente las
+produce directamente.
+
+\paragraph{Pipeline de observación.} El procesamiento de cada observación es:
 \[
 \text{RGB }(480{\times}640{\times}3) \rightarrow \text{recorte 50\% superior (cielo)}
-\rightarrow \text{grises} \rightarrow \text{resize }64{\times}64 \rightarrow (1,64,64)
+\rightarrow \text{grises} \rightarrow \text{resize }64{\times}64 \rightarrow (1,64,64)\ \texttt{uint8}
 \]
-y, tras \code{VecFrameStack(n\_stack=4)} (\code{src/envs.py}), $(4,64,64)$. Las acciones
-continuas se normalizan a un vector plano $[\,v, \delta\,]$ con $v\in[0,1]$,
-$\delta\in[-1,1]$ (necesario: SB3 puede entregar la acción con dimensión extra, lo que
-rompía la dinámica de Duckietown).
+y, tras \code{VecFrameStack(n\_stack=4)} (\code{src/envs.py}), $(4,64,64)$. El apilado de 4
+frames da al agente percepción de velocidad y giro.
 
 \paragraph{\texttt{CustomCNN}.} Extractor de características estilo \emph{NatureCNN}
 (\code{src/cnn.py}): tres capas convolucionales
 $\text{Conv}(32,8,4)\!\rightarrow\!\text{Conv}(64,4,2)\!\rightarrow\!\text{Conv}(64,3,1)$
-con ReLU, \emph{flatten} y capa lineal a 256 características; normaliza la entrada
-\code{uint8} dividiendo por 255. Se conecta a SB3 vía \code{policy\_kwargs} y es común a
-los tres algoritmos.
+con ReLU, \emph{flatten} y capa lineal a 256 características. \textbf{Importante:}
+Stable-Baselines3 ya normaliza las imágenes \code{uint8} a $[0,1]$ (\code{normalize\_images}
+por defecto) \emph{antes} de invocar el extractor, por lo que \code{CustomCNN} \textbf{no}
+vuelve a dividir entre 255 (véase la Sección~\ref{sec:bugs}). Se conecta a SB3 vía
+\code{policy\_kwargs} y es común a los tres algoritmos.
 
 \section{Algoritmos}
 \paragraph{DQN (baseline discreto).} Q-Learning profundo \emph{off-policy}. Como
-Duckietown es continuo, \code{DiscreteActionWrapper} expone 5 acciones discretas (recto,
-giros suaves y fuertes) mapeadas a comandos $[v,\delta]$. Config.: \code{lr}$=10^{-4}$,
-\code{buffer}$=50$k, \code{learning\_starts}$=10$k, \code{batch}$=32$,
-\code{train\_freq}$=4$, \code{target\_update}$=1000$, exploración
-$\varepsilon$ $1.0\!\rightarrow\!0.05$.
+Duckietown es continuo, \code{DiscreteActionWrapper} expone 5 acciones discretas mapeadas a
+comandos de control. Config.: \code{lr}$=10^{-4}$, \code{buffer}$=50$k,
+\code{learning\_starts}$=10$k, \code{batch}$=32$, \code{train\_freq}$=4$,
+\code{target\_update}$=1000$, exploración $\varepsilon$ $1.0\!\rightarrow\!0.05$. Se discute
+en la Sección~\ref{sec:bugs} una incoherencia detectada en su vocabulario de acción.
 
 \paragraph{PPO (baseline continuo).} Gradiente de política \emph{on-policy} con
 \emph{clipping}, estable y eficiente en muestras. Config.: \code{lr}$=3\cdot10^{-4}$,
 \code{n\_steps}$=2048$, \code{batch}$=64$, \code{n\_epochs}$=10$, $\gamma=0.99$,
-$\lambda_{\text{GAE}}=0.95$, \code{clip}$=0.2$.
+$\lambda_{\text{GAE}}=0.95$, \code{clip}$=0.2$. Es la base del modelo final.
 
 \paragraph{SAC (algoritmo avanzado, Fase 3).} Actor-Crítico \emph{off-policy} de máxima
 entropía, con exploración regulada automáticamente. Config.: \code{lr}$=3\cdot10^{-4}$,
 \code{buffer}$=50$k, \code{batch}$=256$, $\tau=0.005$, \code{ent\_coef}=auto. Comparte
 \code{CustomCNN} y wrappers con PPO.
 
-\section{Metodología de entrenamiento}
+\section{Metodología de entrenamiento e infraestructura}
 El entrenamiento real se realizó en \textbf{Google Colab}. El stack de Duckietown exige
 \textbf{Python 3.11} (incompatible con el kernel 3.12 de Colab), por lo que se monta un
 \code{venv} 3.11 y se ejecuta todo como subproceso. Se resolvieron, de forma iterativa,
-varios fallos nativos:
+varios fallos nativos y de infraestructura:
 \begin{itemize}
   \item \textbf{Dependencias:} \code{gym-duckietown} se instala con \code{--no-deps} y se
   re-fija \code{numpy==1.23.5} al final, para no romper el resto del stack.
   \item \textbf{Render headless:} \code{xvfb-run} + \code{MPLBACKEND=Agg}.
   \item \textbf{\emph{Segmentation fault} (Duckietown+OpenGL+SB3):} ocurría al
-  \emph{inicializar} el modelo con el entorno real. Un diagnóstico por aislamiento
-  (entorno sintético con espacios idénticos) demostró que SB3/torch/CNN eran correctos y
-  el crash dependía del entorno real. La solución es el orden \textbf{\emph{model-first}}:
-  construir el modelo sobre un entorno sintético y luego \code{model.set\_env(real)}.
-  \code{train.py} y \code{eval.py} lo soportan con \code{--init-order model-first}.
+  \emph{inicializar} el modelo con el entorno real. La solución es el orden
+  \textbf{\emph{model-first}}: construir el modelo sobre un entorno sintético con espacios
+  idénticos y luego \code{model.set\_env(real)}. \code{train.py} y \code{eval.py} lo
+  soportan con \code{--init-order model-first}.
 \end{itemize}
-Regla de seguridad: el mapa oculto \code{loop\_obstacles} está bloqueado para
-entrenamiento (\code{ValueError}) y solo se usa para evaluación.
+El entorno real se confirma por consola:
+\code{[duckie\_factory] Using real Duckietown env: Duckietown-loop\_empty-v0},
+\code{gym-duckietown version 6.1.34}, \code{using DuckietownEnv}.
+
+\section{Depuración: fallos que invalidaban los resultados}
+\label{sec:bugs}
+El hallazgo más relevante del proyecto es que varios resultados iniciales \emph{negativos}
+no medían la calidad del agente, sino fallos del \emph{pipeline}. En orden de impacto:
+
+\paragraph{(1) Caída silenciosa al \emph{mock}.} Si \code{gym\_duckietown} no se importaba o
+no registraba sus entornos, la fábrica de entornos caía \emph{en silencio} a un
+\code{MockDuckietownEnv} que devuelve \textbf{ruido aleatorio}. Todo lo entrenado/evaluado
+así aprendía sobre ruido. Se corrigió \code{duckie\_factory.py} para (i) \textbf{fallar de
+forma explícita} (\code{RuntimeError}) cuando se pide entorno real y no está disponible
+---nunca cae al \emph{mock} con \code{use\_mock=False}--- y (ii) \textbf{importar
+\code{gym\_duckietown} antes de \code{gym.make}} (ese import es lo que registra los IDs).
+
+\paragraph{(2) Vídeo de render incorrecto.} \code{render()} devolvía un framebuffer ruidoso
+bajo Xvfb y esta versión de \code{gym\_duckietown} no expone \code{render\_obs()}. La fuente
+fiable de imagen es la \textbf{observación RGB cruda} del simulador, que \code{DuckieWrapper}
+guarda en \code{last\_rgb\_frame} (\code{--video-source wrapper\_rgb}). Esto solo afecta a la
+visualización, no a lo que ve el agente. Se confirma con
+\code{frame source=venv.envs[0].last\_rgb\_frame | shape=(480, 640, 3)}.
+
+\paragraph{(3) Convención de acción del baseline antiguo.} El baseline anterior solo conducía
+bien con una transformación \emph{swap-negate} de la acción (\code{action\_mode=wheels\_fixed}):
+su política quedó acoplada a una convención de ruedas concreta. Para un agente \emph{entrenado
+desde cero} la convención es indiferente (el agente aprende el signo que recibe recompensa);
+solo importa para \emph{reutilizar} el baseline antiguo. El modelo final se entrena con
+\code{action\_mode=wheels} (por defecto) y, por tanto, \textbf{no} requiere ningún truco de
+acción en evaluación.
+
+\paragraph{(4) Doble normalización en la CNN (crítico).} \code{CustomCNN.forward} dividía la
+entrada entre 255, pero SB3 \textbf{ya} normaliza las imágenes \code{uint8} a $[0,1]$ con
+\code{preprocess\_obs(normalize\_images=True)} antes de llamar al extractor. Resultado: la
+CNN recibía valores en $[0,\,1/255]\approx[0,\,0.004]$, unas \textbf{255 veces} más pequeños
+de lo debido, degradando gravemente el aprendizaje de \emph{todos} los algoritmos. Verificado
+en Colab:
+\begin{verbatim}
+preprocess_obs max: 0.7843137...   # SB3 ya normaliza a [0,1]
+after extra /255 max: 0.0030757... # la CNN recibia ~255x menos senal
+\end{verbatim}
+\textbf{Corrección} (\code{src/cnn.py}): eliminar la división extra, dejando
+\code{x = observations.float()}. Este fue el cambio decisivo: con la CNN corregida el
+entrenamiento empieza a producir episodios completos con recompensa positiva.
+
+\paragraph{(5) Vocabulario discreto incoherente en DQN.} Las acciones discretas
+(\code{config.DISCRETE\_ACTIONS}) se diseñaron con semántica $[v,\delta]$ (velocidad, giro),
+pero \code{DuckieWrapper} en \code{action\_mode=wheels} las interpreta como
+$[v_{\text{izq}},v_{\text{der}}]$. Así, la acción ``recto'' $[0.6, 0.0]$ se ejecuta como
+rueda izquierda 0.6 / derecha 0.0, es decir, un giro brusco: \textbf{DQN carece de una acción
+de avance recto real}. Por ello DQN se reporta como \textbf{baseline sospechoso/descartado},
+no como modelo final.
+
+\section{Experimentos descartados (no entregables)}
+\label{sec:descartes}
+Por exhaustividad se probaron \emph{action modes} que reducen la dificultad inyectando
+conocimiento de conducción. \textbf{Ninguno se entrega}, porque dejan de ser RL puro:
+\begin{itemize}
+  \item \code{safe\_discrete}: 5 maniobras de rueda predefinidas (recto/giros suaves). Es un
+  \emph{prior} de control hecho a mano.
+  \item \code{v\_omega\_safe}: $[v,\omega]$ con $v$ acotado a $[0.10,0.25]$ y $\omega$ limitado.
+  Restringe a mano la dinámica para no salirse.
+  \item \code{forward\_turn} (avance forzado): \textbf{no se implementó}; sería avance
+  impuesto, no aprendido.
+\end{itemize}
+Igualmente se descartan controladores, PID y cualquier heurística de conducción. El
+entregable usa \code{action\_mode=wheels} (acción de rueda directa, sin acotar).
 
 \section{Resultados}
-Evaluación con \code{eval.py} (3 episodios por mapa, política determinista). La
-Tabla~\ref{tab:res} compara los baselines (DQN, PPO), el algoritmo avanzado SAC y las
-variantes de \textbf{Fase 3} (PPO avanzado v1/v2 y PPO fine-tuned). Cada celda es
-\emph{recompensa media\,$\pm$\,std / longitud media}.
+Todas las evaluaciones de esta sección usan la infraestructura \textbf{corregida} (entorno
+real con fallo explícito, \code{model-first}); las cifras positivas reportadas en
+iteraciones anteriores, previas a estos arreglos, no se reproducían y quedan
+\emph{superadas}. La métrica principal es la recompensa media en el mapa oculto
+\code{loop\_obstacles} (solo evaluación). La columna ``mejor \emph{rollout}'' es el de mayor
+recompensa de un \emph{best-of-10} cualitativo en \code{loop\_obstacles}.
 
 \begin{table}[h]
 \centering
 \footnotesize
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{lrrrl}
+\begin{tabular}{lrrl}
 \toprule
-\textbf{Modelo} & \textbf{loop\_empty} & \textbf{small\_loop} & \textbf{loop\_obstacles} & \textbf{decisión} \\
+\textbf{Modelo} & \textbf{loop\_obstacles (media\,$\pm$\,std / len)} & \textbf{mejor rollout} & \textbf{decisión} \\
 \midrule
-DQN 20k & $-1013.4 / 112$ & $-1001.9 / 86$ & $-1065.8 / 61$ & descartado \\
-DQN 50k & $-1047.6 / 82$  & $-1016.6 / 74$ & $-1032.0 / 37$ & descartado \\
+Baseline antiguo + \code{wheels\_fixed} & $-869.9 \pm 548.6\ /\ 1264$ & --- & fallback inicial \\
+PPO 20k \emph{(bug CNN)}      & $-924.2 \pm 441.4$ & --- & no supera baseline \\
+DQN 20k \emph{(bug CNN)}      & $-1004.6 \pm 30.0$ & --- & descartado (Secc.~\ref{sec:bugs}) \\
+SAC 20k \emph{(bug CNN)}      & $-1021.7 \pm 81.4$ & --- & no supera baseline \\
+PPO 50k single-map \emph{(pre-fix)} & $-1481.8 \pm 473.3\ /\ 456$ & --- & más pasos no ayudan \\
+PPO multimap 50k \emph{(pre-fix)}   & $-1764.9 \pm 712.8\ /\ 460$ & $-887.8$ & multimap no ayuda \\
 \midrule
-\textbf{PPO 20k} & $\mathbf{961.0 / 1500}$ & $\mathbf{317.5 / 1500}$ & $\mathbf{1118.2 / 1500}$ & \textbf{GANADOR} \\
-PPO 50k & $-813.7 / 1500$ & $-1238.9 / 1500$ & $-1105.4 / 1500$ & descartado \\
-\midrule
-SAC 20k & $990.6 / 1500$ & $-1253.6 / 296$ & $915.2 / 1500$ & no gana \\
-SAC 50k & \multicolumn{3}{c}{\emph{no completado (ver nota)}} & --- \\
-\midrule
-PPO avanzado v1 & $-997.1$ & $-1194.9$ & $-1538.9$ & descartado \\
-PPO avanzado v2 & $-188.3$ & $-84.7$ & $138.7$ & no gana \\
-PPO fine-tuned & $-364.2$ & $821.3$ & $513.2$ & no gana \\
+PPO \textbf{cnn-fix} 50k      & $-2038.0 \pm 1408.0\ /\ 1172$ & $\mathbf{1225.7}$ & rollouts positivos, alta varianza \\
+\textbf{PPO cnn-fix 100k (ft)} & $\mathbf{-487.6 \pm 1049.9\ /\ 742}$ & $\mathbf{1249.5}$ & \textbf{MODELO FINAL} \\
 \bottomrule
 \end{tabular}
-\caption{Evaluación de todos los modelos (baselines DQN/PPO, SAC y variantes de Fase 3).
-\code{loop\_obstacles} es el mapa oculto, usado \emph{solo} para evaluación
-(\code{--allow-eval-hidden}), nunca para entrenar. Longitud 1500 = el episodio alcanza el
-límite de pasos sin terminar antes. \textbf{Ganador: PPO 20k} (\code{best\_agent.zip}).
-PPO 20k/50k y SAC incluyen longitud; las variantes de Fase 3 se muestran solo por
-recompensa por brevedad (todas con longitud alta salvo donde el agente sale del carril).}
+\caption{Evaluación en el mapa oculto \code{loop\_obstacles} (solo evaluación, nunca
+entrenamiento). ``cnn-fix'' = con la doble normalización corregida. El modelo final
+(\code{ppo\_cnnfix\_loop\_empty\_100k\_ft} $\rightarrow$ \code{best\_agent.zip}) tiene la
+mejor recompensa media de la familia corregida y supera al baseline antiguo
+($-487.6$ vs $-869.9$), con varios episodios completos de recompensa positiva (mejor
+\emph{rollout} $1249.5$). La media negativa con \emph{std} alta refleja la elevada varianza
+entre \emph{resets}.}
 \label{tab:res}
 \end{table}
 
-\noindent\textbf{Nota (SAC 50k).} El intento de SAC a 50k se \textbf{interrumpió en Colab
-en torno a 30k timesteps tras más de 6\,h} y \textbf{no generó el artefacto
-\code{sac\_advanced\_50k.zip}}; por reproducibilidad y trazabilidad \emph{no} se reporta
-como resultado cuantitativo, solo como intento no completado.
-
-\paragraph{Dry-run del contrato.} En un Colab limpio se reconstruyó el entorno desde
-\code{requirements.txt}, se instaló \code{gym-duckietown} aparte, se re-fijó
-\code{numpy==1.23.5} y se cargó \code{best\_agent.zip}. Versiones verificadas:
-\begin{verbatim}
-numpy 1.23.5 | torch 2.12.0+cu130 | gym 0.25.2
-gymnasium 0.29.1 | stable_baselines3 2.2.1 | gym_duckietown OK
-\end{verbatim}
-La carga y evaluación en \code{loop\_empty} terminó sin error
-(\textbf{reward $535.150$, longitud $1500.0$}), confirmando el ``carga a la primera''.
-
 \section{Discusión}
-\textbf{Por qué gana PPO 20k.} Es el único modelo con recompensa \emph{positiva} en los
-tres mapas y, sobre todo, el mejor en el mapa oculto (\,$1118.216$\,), lo que indica buena
-\textbf{generalización} y no mero sobreajuste a \code{loop\_empty}. Su robustez relativa
-encaja con la naturaleza \emph{on-policy} y estable de PPO sobre observaciones de imagen.
+\textbf{El cambio decisivo fue corregir la normalización.} Antes del \emph{fix}, ningún
+algoritmo (PPO/DQN/SAC, 20k o 50k, single o multimap) superaba al baseline: todos rondaban
+$-900$ a $-1800$ en \code{loop\_obstacles}. Con la CNN corregida, el mismo PPO empieza a
+generar episodios completos con recompensa positiva (mejor \emph{rollout} $1225.7$ ya a 50k).
 
-\textbf{Por qué se descarta PPO 50k.} Más pasos \emph{no} mejoraron: las recompensas son
-negativas en los tres mapas pese a mantener longitud 1500. Es un caso de degradación de la
-política (probable colapso/entropía baja o sobre-optimización del \emph{proxy} de
-recompensa), un recordatorio de que en RL más entrenamiento no implica mejor política.
+\textbf{Por qué el modelo final es PPO cnn-fix 100k (fine-tuning).} Partiendo del PPO cnn-fix
+50k se afinaron 50k pasos adicionales (RL puro, \code{lr} reducido, entrenamiento solo en
+\code{loop\_empty}). Sube la recompensa media en \code{loop\_obstacles} de $-2038$ a $-487.6$
+y mantiene el mejor \emph{rollout} en torno a $1250$. Es el mejor compromiso disponible:
+mejor media que el baseline antiguo y mejor que cualquier variante anterior al \emph{fix}.
 
-\textbf{DQN (baseline discreto).} Tanto 20k como 50k se entrenaron y evaluaron, y se
-\textbf{descartan}: recompensas negativas y, sobre todo, \textbf{episodios muy cortos}
-(longitudes 36--112 frente a 1500), es decir, el agente sale del carril enseguida. Más
-entrenamiento (50k) no lo corrige.
+\textbf{Alta varianza.} La \emph{std} ($\pm1050$) y el \emph{best-of-10} (rollouts de $+1249$
+a $-1397$, algunos terminando pronto) muestran que el agente conduce bien \emph{a veces} y se
+sale otras según la pose inicial. Es una limitación real, no un artefacto de medida.
 
-\textbf{SAC (Fase 3, algoritmo avanzado).} SAC se \textbf{implementó, entrenó y evaluó}
-mediante \textbf{SAC 20k}: logra buen desempeño en \code{loop\_empty} (990.6) y en el mapa
-oculto \code{loop\_obstacles} (915.2), pero \textbf{generaliza mal a \code{small\_loop}}
-(recompensa negativa, longitud media 296) y \textbf{no supera a PPO 20k} en el mapa oculto
-(915.2 frente a 1118.2). El intento de SAC 50k no se completó (ver nota de la
-Tabla~\ref{tab:res}), por lo que no se compara cuantitativamente.
+\textbf{DQN.} Se entrenó y evaluó, pero su vocabulario de acción no contiene un avance recto
+real (Secc.~\ref{sec:bugs}, punto 5); queda como baseline \textbf{sospechoso/descartado}, no
+como entregable.
 
-\textbf{Fase 3: variantes de PPO avanzado (honesto).} Se implementaron y evaluaron tres
-variantes adicionales para la Fase 3, ninguna de las cuales superó al PPO 20k baseline:
-\begin{itemize}
-  \item \textbf{PPO avanzado v1} (hiperparámetros agresivos: \code{lr}$=10^{-4}$,
-  \code{n\_steps}$=4096$, \code{ent\_coef}$=0.01$) \textbf{degradó} la política
-  (recompensas muy negativas, p. ej. $-1538.9$ en \code{loop\_obstacles}). Descartado.
-  \item \textbf{PPO avanzado v2} (conservador, casi baseline con \code{ent\_coef}$=0.001$)
-  mejora respecto a v1 pero queda muy por debajo del baseline ($138.7$ en
-  \code{loop\_obstacles} frente a $1118.2$). No gana.
-  \item \textbf{PPO fine-tuning} desde el ganador (\code{--init-model best\_agent},
-  \code{lr}$=5\cdot10^{-5}$) mejora \code{small\_loop} ($821.3$) pero su
-  \code{loop\_obstacles} ($513.2$) \textbf{no alcanza} al PPO 20k. No gana.
-\end{itemize}
-
-\textbf{Decisión final.} DQN, PPO, SAC y las variantes de Fase 3 comparten arquitectura
-(\code{CustomCNN}) y wrappers, lo que hace la comparación justa. La Fase 3 se diseñó y
-evaluó con varias variantes avanzadas, pero \textbf{ninguna superó al PPO 20k} en el
-criterio principal (robustez/recompensa en el mapa oculto \code{loop\_obstacles}). Por
-honestidad, el modelo final se \textbf{mantiene como \code{best\_agent.zip} = PPO 20k}.
+\textbf{Pureza del enfoque.} El modelo final no usa \code{safe\_discrete}, \code{v\_omega\_safe},
+\code{forward\_turn}, PID ni controladores: aprende de la imagen a velocidades de rueda
+directas. Esas variantes se exploraron y se descartan por inyectar conocimiento de conducción.
 
 \section{Conclusión}
-Se logró un pipeline completo y reproducible (Fase 1 tabular, Fases 2--3 sobre Duckietown)
-y un agente que generaliza al mapa oculto. La contribución práctica principal fue
-diagnosticar y resolver el \emph{segmentation fault} nativo mediante \emph{model-first},
-sin lo cual el entrenamiento/carga no era viable en Colab. El modelo final
-(\code{best\_agent.zip}, copia de \code{ppo\_loop\_empty\_20k\_gpu.zip}) supera a las
-variantes consideradas en el criterio del contrato.
+La contribución práctica principal fue \textbf{diagnosticar y corregir} los fallos que
+invalidaban silenciosamente el entrenamiento ---\emph{mock} silencioso, vídeo de render,
+convención de acción y, sobre todo, la \textbf{doble normalización de la CNN}--- y, sobre la
+base ya sana, entrenar un \textbf{PPO de RL puro} (50k + fine-tuning a 100k) que supera al
+baseline anterior en el mapa oculto y produce conducción real en varios episodios. El modelo
+final entregado es \code{best\_agent.zip} (copia de
+\code{ppo\_cnnfix\_loop\_empty\_100k\_ft.zip}), evaluable sin ningún truco de acción.
+
+\paragraph{Limitaciones y trabajo futuro.}
+\begin{itemize}
+  \item \textbf{Alta varianza} entre \emph{resets}: el desempeño depende mucho de la pose
+  inicial. Mitigable con más pasos y/o evaluación más amplia.
+  \item \textbf{Presupuesto de entrenamiento limitado} (50k--100k pasos): el RL desde píxeles
+  en Duckietown suele requerir órdenes de magnitud más. \textbf{Futuro:} entrenar
+  $\geq$300k--1M pasos con \textbf{vectorización real} (\code{SubprocVecEnv}, varios entornos
+  en paralelo) para hacerlo viable en tiempo.
+  \item \code{loop\_obstacles} es \textbf{más difícil} (obstáculos) y \textbf{solo de
+  evaluación}: parte de la recompensa negativa es \emph{distribution shift} esperado.
+  \item \textbf{Ajuste de hiperparámetros} (p.\,ej.\ \code{ent\_coef}$>0$ para más
+  exploración) y \textbf{revisar el vocabulario de DQN} (incluir un avance recto real, o
+  alinear la semántica con un \emph{action mode} coherente).
+  \item Envolver la evaluación con \textbf{\code{Monitor}} para métricas de episodio más
+  limpias.
+\end{itemize}
 
 \section*{Reproducibilidad}
-Dependencias: \code{requirements.txt} (stack exacto) + \code{gym-duckietown} aparte
-(\code{--no-deps}) + re-fijado de \code{numpy==1.23.5} (detalle en \code{COLAB\_SETUP.md}).
-Protocolo y tabla de experimentos en \code{EXPERIMENTS.md}. Comandos principales:
+Dependencias: \code{requirements.txt} (stack exacto, \code{stable-baselines3==2.2.1},
+\code{gymnasium==0.29.1}, \code{gym==0.25.2}, \code{torch==2.12.0}) + \code{gym-duckietown}
+aparte (\code{--no-deps}) + re-fijado de \code{numpy==1.23.5} (detalle en
+\code{COLAB\_SETUP.md}). Protocolo y tabla de experimentos en \code{EXPERIMENTS.md}. El
+modelo final se entrenó con \code{action\_mode=wheels} y se evalúa \emph{sin} \code{--action-mode}.
 \begin{verbatim}
-# Entrenamiento (CPU o GPU)
-python scripts/run_training_plan.py --stage ppo20k --execute \
-    --eval-after --init-order model-first
+# Modelo final: PPO cnn-fix 50k + fine-tuning a 100k (RL puro, action_mode=wheels)
+python train.py --algo ppo --map Duckietown-loop_empty-v0 --timesteps 50000 \
+    --output ppo_cnnfix_loop_empty_50k --init-order model-first
+python train.py --algo ppo --map Duckietown-loop_empty-v0 --timesteps 50000 \
+    --output ppo_cnnfix_loop_empty_100k_ft \
+    --init-model models/ppo_cnnfix_loop_empty_50k --learning-rate-override 5e-5 \
+    --init-order model-first
 
-# Evaluación del modelo final (mapa permitido)
-python eval.py --algo ppo --model models/best_agent \
-    --map Duckietown-loop_empty-v0 --init-order model-first --device cpu
-
-# Evaluación opcional en el mapa oculto (SOLO evaluación)
-python eval.py --algo ppo --model models/best_agent \
+# Evaluacion del modelo final en el mapa oculto (SOLO evaluacion)
+python eval.py --algo ppo --model best_agent.zip \
     --map Duckietown-loop_obstacles-v0 --allow-eval \
     --init-order model-first --device cpu
+
+# Video (camara real del robot)
+python scripts/make_eval_video.py --algo ppo --model best_agent.zip \
+    --map Duckietown-loop_obstacles-v0 --allow-eval \
+    --video-source wrapper_rgb --rollouts 10 --init-order model-first
 \end{verbatim}
 
 \end{document}
