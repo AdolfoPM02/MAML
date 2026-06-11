@@ -48,6 +48,9 @@ class CustomCNN(BaseFeaturesExtractor):
         self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        # Normalizar uint8 [0, 255] -> float [0, 1].
-        x = observations.float() / 255.0
+        # SB3 ya normaliza imágenes uint8 a [0, 1] antes de llamar al extractor
+        # cuando normalize_images=True (valor por defecto). Aquí NO se vuelve a
+        # dividir entre 255 para evitar la doble normalización (entradas ~255x
+        # demasiado pequeñas, que degradaba el aprendizaje de PPO/DQN/SAC).
+        x = observations.float()
         return self.linear(self.cnn(x))
