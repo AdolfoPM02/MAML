@@ -10,38 +10,16 @@
 \usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
 \usepackage{enumitem}
 \setlist{itemsep=2pt,topsep=3pt}
-\usepackage{titlesec}
-% Cada heading de nivel 1 (\section, incl. \section*) empieza en página nueva.
-\newcommand{\sectionbreak}{\clearpage}
-
 \newcommand{\code}[1]{\texttt{#1}}
 \sloppy
 
 \title{\textbf{Conducción Autónoma en Duckietown mediante Aprendizaje por Refuerzo profundo}\\[4pt]
-\large Memoria técnica --- Proyecto Final MSc IA}
-\author{Adolfo (AdolfoPM02)}
+\large Métodos Avanzados en Machine Learning}
+\author{Adolfo Peña Marín}
 \date{Junio 2026}
 
 \begin{document}
 \maketitle
-
-\begin{abstract}
-\noindent
-Se entrena un agente de \emph{Deep Reinforcement Learning} para conducir en el simulador
-3D \textbf{Duckietown} usando únicamente píxeles de la cámara frontal, con un enfoque de
-\textbf{RL puro}: la política aprende de la imagen directamente a velocidades de rueda, sin
-controladores, PID, avance forzado ni vocabularios de acción que codifiquen conocimiento de
-conducción. La memoria cuenta una historia honesta: la mayor parte del esfuerzo fue
-diagnosticar y corregir fallos del \emph{pipeline} que invalidaban silenciosamente los
-resultados ---caída a un entorno \emph{mock} de ruido, vídeo de render incorrecto, una
-convención de acción mal documentada y, sobre todo, una \textbf{doble normalización de la
-imagen en la CNN}---. Tras corregir la normalización, un \textbf{PPO entrenado 50k pasos y
-afinado hasta 100k} (RL puro, \code{action\_mode=wheels}) pasa a ser el modelo final
-\code{best\_agent.zip}: mejora la recompensa media en el mapa oculto \code{loop\_obstacles}
-respecto al baseline anterior ($-487.6$ frente a $-869.9$) y produce varios episodios
-completos con recompensa positiva (mejor \emph{rollout} $1249.5$), aunque con \textbf{alta
-varianza} entre \emph{resets}.
-\end{abstract}
 
 \section{Introducción y objetivo}
 El objetivo es entrenar un agente capaz de mantenerse en el carril en Duckietown a partir
